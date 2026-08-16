@@ -1,17 +1,13 @@
-# MySQL profile — run with: ./mvnw spring-boot:run -Dspring-boot.run.profiles=mysql
-# Requires a MySQL 8 database named "gymlet" (see docker-compose.yml at the repo root).
-# Override connection details with DB_URL / DB_USER / DB_PASSWORD environment variables.
-
 spring:
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3307/gymlet?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    username: ${DB_USER:gymlet}
-    password: ${DB_PASSWORD:gymlet}
+    url: ${DB_URL}
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
 
   jpa:
     hibernate:
       ddl-auto: update
-    database-platform: org.hibernate.dialect.MySQLDialect
+
 server:
-  port: 8081
+  port: ${PORT:8081}
