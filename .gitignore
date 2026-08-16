@@ -16,3 +16,8 @@ Thumbs.db
 
 # --- Logs / misc ---
 *.log
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
