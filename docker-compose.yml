@@ -1,0 +1,24 @@
+# MySQL 8 for Gymlet (optional — the app also runs on embedded H2 with zero setup).
+# Usage:  docker compose up -d
+# Then run the backend with:  ./mvnw spring-boot:run -Dspring-boot.run.profiles=mysql
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: gymlet-mysql
+    environment:
+      MYSQL_DATABASE: gymlet
+      MYSQL_USER: gymlet
+      MYSQL_PASSWORD: gymlet
+      MYSQL_ROOT_PASSWORD: gymlet
+    ports:
+      - "3307:3306"
+    volumes:
+      - gymlet-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pgymlet"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  gymlet-mysql-data:

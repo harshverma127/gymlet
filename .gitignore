@@ -1,0 +1,18 @@
+# --- Java / Maven ---
+backend/target/
+*.class
+
+# --- Node ---
+frontend/node_modules/
+frontend/dist/
+*.local
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Logs / misc ---
+*.log
