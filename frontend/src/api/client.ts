@@ -22,10 +22,12 @@ export class ApiError extends Error {
   }
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(path, {
+    res = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -67,8 +69,11 @@ export const api = {
   startSession: () => request<Session>("POST", "/api/sessions"),
   session: (id: number) => request<Session>("GET", `/api/sessions/${id}`),
   history: () => request<HistoryItem[]>("GET", "/api/sessions"),
-  updateSet: (sessionId: number, setId: number, body: { weight: number | null; reps: number | null; rir: number | null; completed: boolean }) =>
-    request<Session>("PUT", `/api/sessions/${sessionId}/sets/${setId}`, body),
+  updateSet: (
+    sessionId: number,
+    setId: number,
+    body: { weight: number | null; reps: number | null; rir: number | null; completed: boolean }
+  ) => request<Session>("PUT", `/api/sessions/${sessionId}/sets/${setId}`, body),
   saveNote: (sessionId: number, exerciseId: number, note: string) =>
     request<Session>("POST", `/api/sessions/${sessionId}/notes/${exerciseId}`, { note }),
   finishSession: (sessionId: number, durationMinutes?: number) =>
