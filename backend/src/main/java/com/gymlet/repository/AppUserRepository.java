@@ -13,5 +13,6 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     /** The pre-auth legacy single-user row (no credentials yet). */
     Optional<AppUser> findFirstByPinHashIsNullAndUsernameIsNotNull();
 
-    List<AppUser> findAllByUsernameIsNull();
+    /** Legacy accounts awaiting claim: no PIN set yet (covers partial migrations too). */
+    List<AppUser> findAllByPinHashIsNull();
 }
