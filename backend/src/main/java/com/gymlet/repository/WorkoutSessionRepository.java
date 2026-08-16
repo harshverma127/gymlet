@@ -9,17 +9,24 @@ import java.util.Optional;
 
 public interface WorkoutSessionRepository extends JpaRepository<WorkoutSession, Long> {
 
-    Optional<WorkoutSession> findFirstByDate(LocalDate date);
+    Optional<WorkoutSession> findFirstByUserIdAndDate(Long userId, LocalDate date);
 
-    Optional<WorkoutSession> findFirstByDateAndCompletedTrue(LocalDate date);
+    Optional<WorkoutSession> findFirstByUserIdAndDateAndCompletedTrue(Long userId, LocalDate date);
 
-    List<WorkoutSession> findAllByOrderByDateDescIdDesc();
+    List<WorkoutSession> findAllByUserIdOrderByDateDescIdDesc(Long userId);
 
-    List<WorkoutSession> findByCompletedTrueOrderByDateAsc();
+    List<WorkoutSession> findByUserIdAndCompletedTrueOrderByDateAsc(Long userId);
 
-    List<WorkoutSession> findByCompletedTrueOrderByDateDesc();
+    List<WorkoutSession> findByUserIdAndCompletedTrueOrderByDateDesc(Long userId);
 
-    List<WorkoutSession> findByCompletedTrueAndDateBetweenOrderByDateAsc(LocalDate from, LocalDate to);
+    List<WorkoutSession> findByUserIdAndCompletedTrueAndDateBetweenOrderByDateAsc(Long userId, LocalDate from, LocalDate to);
 
-    List<WorkoutSession> findByWorkoutDayIdAndCompletedTrueOrderByDateDesc(Long workoutDayId);
+    List<WorkoutSession> findByUserIdAndWorkoutDayIdAndCompletedTrueOrderByDateDesc(Long userId, Long workoutDayId);
+
+    Optional<WorkoutSession> findByIdAndUserId(Long id, Long userId);
+
+    List<WorkoutSession> findAllByUserId(Long userId);
+
+    /** Rows that have no owner yet — pre-migration legacy sessions (claimed during migration). */
+    List<WorkoutSession> findAllByUserIdIsNull();
 }

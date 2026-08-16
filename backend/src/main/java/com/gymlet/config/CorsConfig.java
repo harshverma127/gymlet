@@ -12,6 +12,7 @@ public class CorsConfig implements WebMvcConfigurer {
         registry.addMapping("/**")
                 .allowedOrigins(
                         "https://gymlet-1.onrender.com",
+                        "https://gymlet.onrender.com",
                         "http://localhost:5173"
                 )
                 .allowedMethods(

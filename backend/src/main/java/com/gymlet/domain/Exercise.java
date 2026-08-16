@@ -17,6 +17,10 @@ public class Exercise {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Owner. Null rows are the shared default exercise library copied into each new account. */
+    @Column(name = "user_id")
+    private Long userId;
+
     @Column(nullable = false)
     private String name;
 
@@ -36,6 +40,14 @@ public class Exercise {
 
     public Long getId() {
         return id;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
 
     public String getName() {

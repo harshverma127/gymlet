@@ -54,21 +54,20 @@ public class StructureService {
 
     @Transactional(readOnly = true)
     public List<WorkoutDtos.WorkoutDayDto> getWorkoutDays() {
-        return workoutDayRepository.findAll().stream()
-                .sorted((a, b) -> Integer.compare(a.getDayNumber(), b.getDayNumber()))
+        return workoutDayRepository.findAllByUserIdOrderByDayNumberAsc(userContext.getUserId()).stream()
                 .map(this::toWorkoutDayDto)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public WorkoutDtos.WorkoutDayDto getWorkoutDay(Long id) {
-        return toWorkoutDayDto(workoutDayRepository.findById(id)
+        return toWorkoutDayDto(workoutDayRepository.findByIdAndUserId(id, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found")));
     }
 
     @Transactional(readOnly = true)
     public WorkoutDtos.WorkoutDayDto getWorkoutDayByNumber(int dayNumber) {
-        return toWorkoutDayDto(workoutDayRepository.findByDayNumber(dayNumber)
+        return toWorkoutDayDto(workoutDayRepository.findByUserIdAndDayNumber(userContext.getUserId(), dayNumber)
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found")));
     }
 
@@ -86,7 +85,7 @@ public class StructureService {
         int idx = (today.getDayOfWeek().getValue() - user.getStartDay() + 7) % 7; // 0..6
         boolean restDay = idx >= 5;
 
-        WorkoutSession existing = sessionRepository.findFirstByDate(today).orElse(null);
+        WorkoutSession existing = sessionRepository.findFirstByUserIdAndDate(user.getId(), today).orElse(null);
         if (existing != null) {
             WorkoutDay day = existing.getWorkoutDay();
             return buildTodayDto(day, today, existing, null);
@@ -97,7 +96,7 @@ public class StructureService {
             return buildTodayDto(next, today, null, next);
         }
 
-        WorkoutDay day = workoutDayRepository.findByDayNumber(idx + 1)
+        WorkoutDay day = workoutDayRepository.findByUserIdAndDayNumber(user.getId(), idx + 1)
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
         return buildTodayDto(day, today, null, null);
     }
@@ -108,7 +107,7 @@ public class StructureService {
             int i = (d.getDayOfWeek().getValue() - startDay + 7) % 7;
             if (i < 5) {
                 int dayNumber = i + 1;
-                return workoutDayRepository.findByDayNumber(dayNumber)
+                return workoutDayRepository.findByUserIdAndDayNumber(userContext.getUserId(), dayNumber)
                         .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
             }
             d = d.plusDays(1);
@@ -147,7 +146,7 @@ public class StructureService {
 
     /** Last completed session's sets (and optional note) for an exercise, across all history. */
     private LastSessionData lastSessionForExercise(Long exerciseId) {
-        List<WorkoutSession> completed = sessionRepository.findByCompletedTrueOrderByDateDesc();
+        List<WorkoutSession> completed = sessionRepository.findByUserIdAndCompletedTrueOrderByDateDesc(userContext.getUserId());
         for (WorkoutSession s : completed) {
             List<SetLog> logs = setLogRepository.findBySessionIdAndExerciseIdOrderBySetNumberAsc(s.getId(), exerciseId);
             if (!logs.isEmpty()) {
@@ -198,19 +197,21 @@ public class StructureService {
 
     @Transactional(readOnly = true)
     public List<WorkoutDtos.ExerciseDto> getExercises() {
-        return exerciseRepository.findAllByOrderByNameAsc().stream().map(this::toExerciseDto).toList();
+        return exerciseRepository.findAllByUserIdOrderByNameAsc(userContext.getUserId()).stream()
+                .map(this::toExerciseDto).toList();
     }
 
     @Transactional
     public WorkoutDtos.ExerciseDto createExercise(Requests.ExerciseRequest req) {
         Exercise ex = new Exercise();
+        ex.setUserId(userContext.getUserId());
         applyExerciseRequest(ex, req);
         return toExerciseDto(exerciseRepository.save(ex));
     }
 
     @Transactional
     public WorkoutDtos.ExerciseDto updateExercise(Long id, Requests.ExerciseRequest req) {
-        Exercise ex = exerciseRepository.findById(id)
+        Exercise ex = exerciseRepository.findByIdAndUserId(id, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Exercise not found"));
         applyExerciseRequest(ex, req);
         return toExerciseDto(exerciseRepository.save(ex));
@@ -229,9 +230,11 @@ public class StructureService {
 
     @Transactional
     public void deleteExercise(Long id) {
-        if (!workoutExerciseRepository.findByExerciseId(id).isEmpty()) {
+        if (!workoutExerciseRepository.findByExerciseIdAndExerciseUserId(id, userContext.getUserId()).isEmpty()) {
             throw new IllegalArgumentException("This exercise is used in the workout split. Remove it from all days first.");
         }
+        exerciseRepository.findByIdAndUserId(id, userContext.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("Exercise not found"));
         exerciseRepository.deleteById(id);
     }
 
@@ -239,9 +242,9 @@ public class StructureService {
 
     @Transactional
     public WorkoutDtos.WorkoutDayDto addExerciseToDay(Long workoutDayId, Requests.AddExerciseToDayRequest req) {
-        WorkoutDay day = workoutDayRepository.findById(workoutDayId)
+        WorkoutDay day = workoutDayRepository.findByIdAndUserId(workoutDayId, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
-        Exercise ex = exerciseRepository.findById(req.exerciseId())
+        Exercise ex = exerciseRepository.findByIdAndUserId(req.exerciseId(), userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Exercise not found"));
         List<WorkoutExercise> existing = workoutExerciseRepository.findByWorkoutDayIdOrderBySetOrderAsc(workoutDayId);
         if (existing.stream().anyMatch(we -> we.getExercise().getId().equals(req.exerciseId()))) {
@@ -258,7 +261,7 @@ public class StructureService {
 
     @Transactional
     public WorkoutDtos.WorkoutDayDto updateExerciseInDay(Long id, Requests.UpdateExerciseInDayRequest req) {
-        WorkoutExercise we = workoutExerciseRepository.findById(id)
+        WorkoutExercise we = workoutExerciseRepository.findByIdAndWorkoutDayUserId(id, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout exercise not found"));
         if (req.sets() != null) {
             if (req.sets() < 1) {
@@ -275,7 +278,7 @@ public class StructureService {
 
     @Transactional
     public WorkoutDtos.WorkoutDayDto removeExerciseFromDay(Long id) {
-        WorkoutExercise we = workoutExerciseRepository.findById(id)
+        WorkoutExercise we = workoutExerciseRepository.findByIdAndWorkoutDayUserId(id, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout exercise not found"));
         Long dayId = we.getWorkoutDay().getId();
         workoutExerciseRepository.delete(we);

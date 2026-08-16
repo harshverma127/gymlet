@@ -19,6 +19,14 @@ public class AppUser {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Login name, unique. Null only for the pre-auth legacy single-user row (migrated on boot). */
+    @Column(unique = true, length = 30)
+    private String username;
+
+    /** BCrypt hash of the 4-digit PIN. Never stored in plain text. */
+    @Column(length = 80)
+    private String pinHash;
+
     @Column(nullable = false)
     private String name;
 
@@ -35,6 +43,22 @@ public class AppUser {
 
     public Long getId() {
         return id;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPinHash() {
+        return pinHash;
+    }
+
+    public void setPinHash(String pinHash) {
+        this.pinHash = pinHash;
     }
 
     public String getName() {

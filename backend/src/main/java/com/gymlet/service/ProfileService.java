@@ -5,6 +5,7 @@ import com.gymlet.domain.AppUser;
 import com.gymlet.domain.Unit;
 import com.gymlet.domain.WorkoutDay;
 import com.gymlet.domain.WorkoutSession;
+import com.gymlet.repository.AppUserRepository;
 import com.gymlet.repository.BodyWeightLogRepository;
 import com.gymlet.repository.ExerciseNoteRepository;
 import com.gymlet.repository.SetLogRepository;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class ProfileService {
 
     private final UserContext userContext;
+    private final AppUserRepository userRepository;
     private final BodyWeightLogRepository bodyWeightRepository;
     private final SetLogRepository setLogRepository;
     private final ExerciseNoteRepository exerciseNoteRepository;
@@ -30,6 +32,7 @@ public class ProfileService {
     private final ObjectMapper objectMapper;
 
     public ProfileService(UserContext userContext,
+                          AppUserRepository userRepository,
                           BodyWeightLogRepository bodyWeightRepository,
                           SetLogRepository setLogRepository,
                           ExerciseNoteRepository exerciseNoteRepository,
@@ -37,6 +40,7 @@ public class ProfileService {
                           StructureService structureService,
                           ObjectMapper objectMapper) {
         this.userContext = userContext;
+        this.userRepository = userRepository;
         this.bodyWeightRepository = bodyWeightRepository;
         this.setLogRepository = setLogRepository;
         this.exerciseNoteRepository = exerciseNoteRepository;
@@ -57,6 +61,7 @@ public class ProfileService {
         user.setName(req.name().trim());
         user.setUnit(Unit.valueOf(req.unit()));
         user.setStartDay(req.startDay());
+        userRepository.save(user);
         return new StatsDtos.ProfileDto(user.getName(), user.getUnit().name(), user.getStartDay());
     }
 
@@ -69,7 +74,7 @@ public class ProfileService {
         data.put("profile", getProfile());
         data.put("workoutDays", structureService.getWorkoutDays());
         List<Map<String, Object>> sessions = new java.util.ArrayList<>();
-        for (WorkoutSession s : sessionRepository.findAllByOrderByDateDescIdDesc()) {
+        for (WorkoutSession s : sessionRepository.findAllByUserIdOrderByDateDescIdDesc(userContext.getUserId())) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", s.getId());
             m.put("date", s.getDate().toString());
@@ -80,7 +85,7 @@ public class ProfileService {
             sessions.add(m);
         }
         data.put("sessions", sessions);
-        data.put("bodyWeight", bodyWeightRepository.findAllByOrderByDateAsc());
+        data.put("bodyWeight", bodyWeightRepository.findAllByUserIdOrderByDateAsc(userContext.getUserId()));
         try {
             return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(data);
         } catch (Exception e) {
@@ -88,10 +93,10 @@ public class ProfileService {
         }
     }
 
-    /** Wipes all workout history and bodyweight logs, keeping the split + profile. */
+    /** Wipes all workout history and bodyweight logs for this user, keeping the split + profile. */
     @Transactional
     public void resetData() {
-        List<WorkoutSession> sessions = sessionRepository.findAll();
+        List<WorkoutSession> sessions = sessionRepository.findAllByUserId(userContext.getUserId());
         if (!sessions.isEmpty()) {
             setLogRepository.deleteAll(setLogRepository.findBySessionIn(sessions));
             for (WorkoutSession s : sessions) {
@@ -99,13 +104,13 @@ public class ProfileService {
             }
             sessionRepository.deleteAll(sessions);
         }
-        bodyWeightRepository.deleteAll();
+        bodyWeightRepository.deleteAllByUserId(userContext.getUserId());
     }
 
-    /** Removes the sample data seeded on first launch. */
+    /** Removes the sample data seeded on first launch (only present on migrated accounts). */
     @Transactional
     public void removeDemoData() {
-        List<WorkoutSession> demo = sessionRepository.findAll().stream()
+        List<WorkoutSession> demo = sessionRepository.findAllByUserId(userContext.getUserId()).stream()
                 .filter(WorkoutSession::isDemo)
                 .toList();
         if (!demo.isEmpty()) {
@@ -116,7 +121,7 @@ public class ProfileService {
             sessionRepository.deleteAll(demo);
         }
         bodyWeightRepository.deleteAll(
-                bodyWeightRepository.findAllByOrderByDateAsc().stream()
+                bodyWeightRepository.findAllByUserIdOrderByDateAsc(userContext.getUserId()).stream()
                         .filter(l -> l.isDemo())
                         .toList());
     }

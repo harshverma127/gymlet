@@ -1,21 +1,36 @@
 package com.gymlet.service;
 
 import com.gymlet.domain.AppUser;
-import com.gymlet.repository.AppUserRepository;
+import com.gymlet.web.UnauthorizedException;
 import org.springframework.stereotype.Component;
 
-/** Single-user personal app: resolves the one AppUser record (seeded at startup). */
+/**
+ * Resolves the authenticated user for the current request.
+ * The AuthFilter reads the session token and stores the user here per-request;
+ * the backend never trusts a userId coming from the frontend.
+ */
 @Component
 public class UserContext {
 
-    private final AppUserRepository userRepository;
+    private static final ThreadLocal<AppUser> CURRENT = new ThreadLocal<>();
 
-    public UserContext(AppUserRepository userRepository) {
-        this.userRepository = userRepository;
+    public static void set(AppUser user) {
+        CURRENT.set(user);
+    }
+
+    public static void clear() {
+        CURRENT.remove();
     }
 
     public AppUser getUser() {
-        return userRepository.findAll().stream().findFirst()
-                .orElseThrow(() -> new IllegalStateException("No user profile found"));
+        AppUser user = CURRENT.get();
+        if (user == null) {
+            throw new UnauthorizedException("Not logged in");
+        }
+        return user;
+    }
+
+    public Long getUserId() {
+        return getUser().getId();
     }
 }

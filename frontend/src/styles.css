@@ -63,6 +63,134 @@ textarea {
   color: var(--ink);
 }
 
+/* ------------------------------------------------------------ auth */
+
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 18px;
+}
+
+.auth-card-wrap {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.auth-logo {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.auth-card {
+  width: 100%;
+  background: var(--card);
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: pop-in 0.25s ease both;
+}
+
+.auth-title {
+  margin: 4px 0 0;
+  font-size: 1.3rem;
+  line-height: 1.25;
+}
+
+.auth-sub {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  margin-top: 6px;
+}
+
+.auth-form .field input {
+  padding: 13px 14px;
+  font-size: 1rem;
+  border-radius: 11px;
+}
+
+.auth-error {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--danger);
+  background: var(--danger-light);
+  border: 1.5px solid #ecc0b5;
+  border-radius: 9px;
+  padding: 8px 11px;
+}
+
+.auth-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.auth-link {
+  border: none;
+  background: none;
+  padding: 4px 2px;
+  color: var(--sage-deep);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.auth-link:hover {
+  text-decoration: underline;
+}
+
+.auth-foot {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.auth-loading {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.claim-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--sage-light);
+  border: 2px solid #c3ddca;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.8rem;
+  color: var(--sage-deep);
+  margin-bottom: 6px;
+}
+
+.claim-banner svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
 /* ------------------------------------------------------------ layout */
 
 .shell {
@@ -94,7 +222,14 @@ textarea {
 .topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 14px 18px 6px;
+}
+
+.topbar-logout {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
 }
 
 .content {
@@ -190,6 +325,27 @@ textarea {
   color: var(--ink-soft);
   font-size: 0.72rem;
   padding: 0 6px;
+}
+
+.side-logout {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: 10px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+}
+
+.side-logout:hover {
+  background: var(--danger-light);
+  color: var(--danger);
 }
 
 /* bottom nav (mobile-first) */
@@ -951,9 +1107,10 @@ textarea {
   align-items: center;
   gap: 5px;
   border: 2px solid var(--line);
-  border-radius: 9px;
+  border-radius: 10px;
   background: #fff;
-  padding: 0 8px;
+  padding: 0 9px;
+  min-height: 46px;
   transition: border-color 0.15s;
 }
 
@@ -966,8 +1123,8 @@ textarea {
   min-width: 0;
   border: none;
   background: transparent;
-  padding: 8px 0;
-  font-size: 0.95rem;
+  padding: 13px 0;
+  font-size: 1rem;
   font-weight: 700;
   text-align: right;
   outline: none;

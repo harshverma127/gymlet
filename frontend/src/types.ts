@@ -1,4 +1,19 @@
 export type Unit = "KG" | "LB";
+
+export interface AuthUser {
+  username: string;
+  name: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  username: string;
+  name: string;
+}
+
+export interface AuthStatus {
+  legacyUsername: string | null;
+}
 export type MuscleGroup =
   | "CHEST"
   | "BACK"

@@ -1,4 +1,6 @@
 import type {
+  AuthStatus,
+  AuthUser,
   BodyWeightEntry,
   BodyWeightSummary,
   CalendarDay,
@@ -6,6 +8,7 @@ import type {
   ExerciseStrength,
   FinishSummary,
   HistoryItem,
+  LoginResponse,
   MuscleVolume,
   PrSummary,
   Profile,
@@ -23,16 +26,55 @@ export class ApiError extends Error {
   }
 }
 
-// Backend deployed on Render
-const API_BASE_URL = "https://gymlet.onrender.com";
+// Backend deployed on Render. Override locally with VITE_API_URL (e.g. http://localhost:8080)
+// in .env.local — the value is embedded at build time.
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "https://gymlet.onrender.com";
+
+const TOKEN_KEY = "gymlet.token";
+
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* storage unavailable — session only works in memory */
+  }
+}
+
+export function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Called whenever the backend rejects the session (401) so the app can go back to login. */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
 
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -51,6 +93,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       /* keep default */
     }
 
+    if (res.status === 401) {
+      clearToken();
+      onUnauthorized?.();
+    }
+
     throw new ApiError(res.status, message);
   }
 
@@ -62,6 +109,25 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  // auth
+  register: (username: string, pin: string) =>
+    request<LoginResponse>("POST", "/api/auth/register", { username, pin }),
+
+  login: (username: string, pin: string) =>
+    request<LoginResponse>("POST", "/api/auth/login", { username, pin }),
+
+  claim: (username: string, pin: string) =>
+    request<LoginResponse>("POST", "/api/auth/claim", { username, pin }),
+
+  logout: () =>
+    request<{ ok: string }>("POST", "/api/auth/logout"),
+
+  me: () =>
+    request<AuthUser>("GET", "/api/auth/me"),
+
+  authStatus: () =>
+    request<AuthStatus>("GET", "/api/auth/status"),
+
   // today + structure
   today: () => request<Today>("GET", "/api/today"),
 
@@ -201,4 +267,7 @@ export const api = {
 
   removeDemo: () =>
     request<{ ok: string }>("POST", "/api/demo/remove"),
+
+  exportData: () =>
+    request<Record<string, unknown>>("GET", "/api/export"),
 };

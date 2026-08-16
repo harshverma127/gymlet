@@ -171,7 +171,23 @@ export function ProfilePage() {
       <Card className="section-card">
         <h2 className="section-title">Data</h2>
         <div className="data-actions">
-          <Button variant="secondary" onClick={() => window.open("/api/export", "_blank")}>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              try {
+                const data = await api.exportData();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `gymlet-export-${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (e) {
+                toast(e instanceof ApiError ? e.message : "Couldn't export data", "error");
+              }
+            }}
+          >
             <DownloadIcon size={15} /> Export data (JSON)
           </Button>
           <Button

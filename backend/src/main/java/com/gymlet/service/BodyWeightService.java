@@ -15,27 +15,30 @@ import java.util.NoSuchElementException;
 public class BodyWeightService {
 
     private final BodyWeightLogRepository bodyWeightRepository;
+    private final UserContext userContext;
 
-    public BodyWeightService(BodyWeightLogRepository bodyWeightRepository) {
+    public BodyWeightService(BodyWeightLogRepository bodyWeightRepository, UserContext userContext) {
         this.bodyWeightRepository = bodyWeightRepository;
+        this.userContext = userContext;
     }
 
     @Transactional(readOnly = true)
     public List<StatsDtos.BodyWeightDto> list() {
-        return bodyWeightRepository.findAllByOrderByDateAsc().stream()
+        return bodyWeightRepository.findAllByUserIdOrderByDateAsc(userContext.getUserId()).stream()
                 .map(this::toDto)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public StatsDtos.BodyWeightSummaryDto summary() {
-        List<BodyWeightLog> logs = bodyWeightRepository.findAllByOrderByDateAsc();
+        List<BodyWeightLog> logs = bodyWeightRepository.findAllByUserIdOrderByDateAsc(userContext.getUserId());
         if (logs.isEmpty()) {
             return new StatsDtos.BodyWeightSummaryDto(null, null, null, List.of());
         }
         BodyWeightLog current = logs.get(logs.size() - 1);
         LocalDate from = LocalDate.now().minusDays(6);
-        List<BodyWeightLog> week = bodyWeightRepository.findByDateBetweenOrderByDateAsc(from, LocalDate.now());
+        List<BodyWeightLog> week = bodyWeightRepository
+                .findByUserIdAndDateBetweenOrderByDateAsc(userContext.getUserId(), from, LocalDate.now());
         double weeklyAverage = week.stream().mapToDouble(BodyWeightLog::getWeightKg).average().orElse(current.getWeightKg());
         BodyWeightLog weekStart = week.isEmpty() ? null : week.get(0);
         Double change = weekStart == null || weekStart.getDate().equals(current.getDate())
@@ -57,10 +60,10 @@ public class BodyWeightService {
         if (date.isAfter(LocalDate.now())) {
             throw new IllegalArgumentException("Date can't be in the future");
         }
-        BodyWeightLog log = bodyWeightRepository.findAllByOrderByDateAsc().stream()
-                .filter(l -> l.getDate().equals(date))
-                .findFirst()
+        BodyWeightLog log = bodyWeightRepository
+                .findByUserIdAndDate(userContext.getUserId(), date)
                 .orElseGet(BodyWeightLog::new);
+        log.setUserId(userContext.getUserId());
         log.setDate(date);
         log.setWeightKg(req.weightKg());
         log.setDemo(false);
@@ -69,7 +72,7 @@ public class BodyWeightService {
 
     @Transactional
     public void delete(Long id) {
-        BodyWeightLog log = bodyWeightRepository.findById(id)
+        BodyWeightLog log = bodyWeightRepository.findByIdAndUserId(id, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Body weight entry not found"));
         bodyWeightRepository.delete(log);
     }

@@ -17,6 +17,10 @@ public class BodyWeightLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Owner. Null only for pre-migration legacy rows (claimed by the legacy user on boot). */
+    @Column(name = "user_id")
+    private Long userId;
+
     @Column(nullable = false)
     private LocalDate date;
 
@@ -30,6 +34,14 @@ public class BodyWeightLog {
 
     public Long getId() {
         return id;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
 
     public LocalDate getDate() {

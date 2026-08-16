@@ -232,6 +232,17 @@ export function SparkleIcon(props: IconProps) {
   );
 }
 
+export function LogoutIcon(props: IconProps) {
+  const { size, ...rest } = props;
+  return (
+    <svg {...base(size, rest)}>
+      <path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9" />
+      <path d="M15 8l4 4-4 4" />
+      <path d="M19 12H9" />
+    </svg>
+  );
+}
+
 export function ChevronDownIcon(props: IconProps) {
   const { size, ...rest } = props;
   return (

@@ -39,7 +39,7 @@ public class StatsService {
 
     @Transactional(readOnly = true)
     public List<StatsDtos.ExerciseStrengthDto> strengthProgress() {
-        List<WorkoutSession> completed = sessionRepository.findByCompletedTrueOrderByDateAsc();
+        List<WorkoutSession> completed = sessionRepository.findByUserIdAndCompletedTrueOrderByDateAsc(userContext.getUserId());
         if (completed.isEmpty()) {
             return List.of();
         }
@@ -104,7 +104,8 @@ public class StatsService {
     @Transactional(readOnly = true)
     public List<StatsDtos.MuscleDto> muscleVolume() {
         LocalDate from = LocalDate.now().minusDays(6);
-        List<WorkoutSession> sessions = sessionRepository.findByCompletedTrueAndDateBetweenOrderByDateAsc(from, LocalDate.now());
+        List<WorkoutSession> sessions = sessionRepository
+                .findByUserIdAndCompletedTrueAndDateBetweenOrderByDateAsc(userContext.getUserId(), from, LocalDate.now());
         if (sessions.isEmpty()) {
             return List.of();
         }
@@ -136,7 +137,7 @@ public class StatsService {
 
     @Transactional(readOnly = true)
     public StatsDtos.PrSummaryDto prSummary() {
-        List<WorkoutSession> completed = sessionRepository.findByCompletedTrueOrderByDateAsc();
+        List<WorkoutSession> completed = sessionRepository.findByUserIdAndCompletedTrueOrderByDateAsc(userContext.getUserId());
         Map<Long, Exercise> exercises = new HashMap<>();
         Map<Long, double[]> best = new HashMap<>(); // exerciseId -> {highestWeight, bestReps, best1RM}
         double bestSessionVolume = 0;
@@ -179,11 +180,11 @@ public class StatsService {
 
     private int currentStreak() {
         LocalDate d = LocalDate.now();
-        if (sessionRepository.findFirstByDateAndCompletedTrue(d).isEmpty()) {
+        if (sessionRepository.findFirstByUserIdAndDateAndCompletedTrue(userContext.getUserId(), d).isEmpty()) {
             d = d.minusDays(1);
         }
         int streak = 0;
-        while (sessionRepository.findFirstByDateAndCompletedTrue(d).isPresent()) {
+        while (sessionRepository.findFirstByUserIdAndDateAndCompletedTrue(userContext.getUserId(), d).isPresent()) {
             streak++;
             d = d.minusDays(1);
         }
@@ -217,7 +218,7 @@ public class StatsService {
         List<StatsDtos.CalendarDayDto> days = new ArrayList<>();
         for (int day = 1; day <= ym.lengthOfMonth(); day++) {
             LocalDate date = ym.atDay(day);
-            WorkoutSession s = sessionRepository.findFirstByDate(date).orElse(null);
+            WorkoutSession s = sessionRepository.findFirstByUserIdAndDate(user.getId(), date).orElse(null);
             String status;
             Integer dayNumber = null;
             Long sessionId = null;

@@ -68,14 +68,15 @@ public class SessionService {
         if (idx >= 5) {
             throw new IllegalArgumentException("It's a rest day — enjoy the break!");
         }
-        if (sessionRepository.findFirstByDate(today).isPresent()) {
+        if (sessionRepository.findFirstByUserIdAndDate(user.getId(), today).isPresent()) {
             throw new IllegalArgumentException("You already have a session for today");
         }
 
-        WorkoutDay day = workoutDayRepository.findByDayNumber(idx + 1)
+        WorkoutDay day = workoutDayRepository.findByUserIdAndDayNumber(user.getId(), idx + 1)
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
 
         WorkoutSession session = new WorkoutSession();
+        session.setUserId(user.getId());
         session.setDate(today);
         session.setWorkoutDay(day);
         session.setStartedAt(LocalDateTime.now());
@@ -118,14 +119,14 @@ public class SessionService {
 
     @Transactional(readOnly = true)
     public WorkoutDtos.SessionDto getSession(Long sessionId) {
-        WorkoutSession s = sessionRepository.findById(sessionId)
+        WorkoutSession s = sessionRepository.findByIdAndUserId(sessionId, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout session not found"));
         return toSessionDto(s);
     }
 
     @Transactional(readOnly = true)
     public List<WorkoutDtos.HistoryItemDto> getHistory() {
-        List<WorkoutSession> sessions = sessionRepository.findAllByOrderByDateDescIdDesc();
+        List<WorkoutSession> sessions = sessionRepository.findAllByUserIdOrderByDateDescIdDesc(userContext.getUserId());
         if (sessions.isEmpty()) {
             return List.of();
         }
@@ -190,7 +191,7 @@ public class SessionService {
             if (en == null) {
                 en = new ExerciseNote();
                 en.setSession(s);
-                en.setExercise(exerciseRepository.findById(exerciseId)
+                en.setExercise(exerciseRepository.findByIdAndUserId(exerciseId, userContext.getUserId())
                         .orElseThrow(() -> new NoSuchElementException("Exercise not found")));
             }
             en.setNote(note);
@@ -201,7 +202,7 @@ public class SessionService {
 
     @Transactional
     public void deleteSession(Long sessionId) {
-        WorkoutSession s = sessionRepository.findById(sessionId)
+        WorkoutSession s = sessionRepository.findByIdAndUserId(sessionId, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout session not found"));
         setLogRepository.deleteBySession(s);
         exerciseNoteRepository.deleteBySession(s);
@@ -242,7 +243,7 @@ public class SessionService {
     private List<WorkoutDtos.PrDto> computePrs(WorkoutSession s, List<SetLog> done, double sessionVolume) {
         // Historical bests (excluding this session).
         Map<Long, double[]> best = new HashMap<>(); // exerciseId -> {highestWeight, bestReps, best1RM}
-        List<WorkoutSession> others = sessionRepository.findByCompletedTrueOrderByDateAsc().stream()
+        List<WorkoutSession> others = sessionRepository.findByUserIdAndCompletedTrueOrderByDateAsc(userContext.getUserId()).stream()
                 .filter(o -> !o.getId().equals(s.getId()))
                 .toList();
         if (!others.isEmpty()) {
@@ -315,17 +316,17 @@ public class SessionService {
             if (completed == total) {
                 return "Perfect session — all " + total + " sets completed. Consistency is the magic.";
             }
-            return "Solid session — " + completed + " sets logged. See you next time!";
+            return "Solid session — " + completed + " " + plural(completed, "set") + " logged. See you next time!";
         }
         if (completed == total) {
             return "First time running this one — you knocked out all " + total + " sets. Great start!";
         }
-        return "First time running this one — " + completed + " sets logged. Welcome!";
+        return "First time running this one — " + completed + " " + plural(completed, "set") + " logged. Welcome!";
     }
 
     private WorkoutSession previousSessionOfDay(WorkoutDay day, WorkoutSession exclude) {
         List<WorkoutSession> sessions = sessionRepository
-                .findByWorkoutDayIdAndCompletedTrueOrderByDateDesc(day.getId());
+                .findByUserIdAndWorkoutDayIdAndCompletedTrueOrderByDateDesc(userContext.getUserId(), day.getId());
         for (WorkoutSession s : sessions) {
             if (exclude == null || !s.getId().equals(exclude.getId())) {
                 return s;
@@ -346,8 +347,12 @@ public class SessionService {
 
     // -------------------------------------------------------------- helpers
 
+    private String plural(int n, String word) {
+        return n == 1 ? word : word + "s";
+    }
+
     private WorkoutSession requireSession(Long id) {
-        return sessionRepository.findById(id)
+        return sessionRepository.findByIdAndUserId(id, userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Workout session not found"));
     }
 

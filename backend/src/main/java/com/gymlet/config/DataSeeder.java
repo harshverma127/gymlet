@@ -1,6 +1,5 @@
 package com.gymlet.config;
 
-import com.gymlet.domain.AppMeta;
 import com.gymlet.domain.AppUser;
 import com.gymlet.domain.BodyWeightLog;
 import com.gymlet.domain.Exercise;
@@ -10,7 +9,6 @@ import com.gymlet.domain.Unit;
 import com.gymlet.domain.WorkoutDay;
 import com.gymlet.domain.WorkoutExercise;
 import com.gymlet.domain.WorkoutSession;
-import com.gymlet.repository.AppMetaRepository;
 import com.gymlet.repository.AppUserRepository;
 import com.gymlet.repository.BodyWeightLogRepository;
 import com.gymlet.repository.ExerciseRepository;
@@ -20,7 +18,9 @@ import com.gymlet.repository.WorkoutExerciseRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,13 +31,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Seeds the app on first launch:
- *  - the single user profile
- *  - the exact 5-day split (Day 1..5)
- *  - a few weeks of realistic sample workout history + bodyweight, clearly marked as demo
- *    (removable in one click from Profile, or with POST /api/demo/remove)
+ * Seeds the shared default 5-day split as a template (rows with user_id NULL).
+ * Every new account gets an independent copy of it when it registers.
+ *
+ * With gymlet.seed-legacy-demo=true (dev/testing only) it also recreates the
+ * pre-multi-user single-user world (legacy user + sample history) so the
+ * migration in {@link SchemaMigration} can be exercised end-to-end.
  */
 @Component
+@Order(1)
 public class DataSeeder implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataSeeder.class);
@@ -49,7 +51,8 @@ public class DataSeeder implements CommandLineRunner {
     private final WorkoutSessionRepository sessionRepository;
     private final SetLogRepository setLogRepository;
     private final BodyWeightLogRepository bodyWeightRepository;
-    private final AppMetaRepository appMetaRepository;
+
+    private final boolean seedLegacyDemo;
 
     public DataSeeder(AppUserRepository userRepository,
                       WorkoutDayRepository workoutDayRepository,
@@ -58,7 +61,7 @@ public class DataSeeder implements CommandLineRunner {
                       WorkoutSessionRepository sessionRepository,
                       SetLogRepository setLogRepository,
                       BodyWeightLogRepository bodyWeightRepository,
-                      AppMetaRepository appMetaRepository) {
+                      @Value("${gymlet.seed-legacy-demo:false}") boolean seedLegacyDemo) {
         this.userRepository = userRepository;
         this.workoutDayRepository = workoutDayRepository;
         this.exerciseRepository = exerciseRepository;
@@ -66,39 +69,28 @@ public class DataSeeder implements CommandLineRunner {
         this.sessionRepository = sessionRepository;
         this.setLogRepository = setLogRepository;
         this.bodyWeightRepository = bodyWeightRepository;
-        this.appMetaRepository = appMetaRepository;
+        this.seedLegacyDemo = seedLegacyDemo;
     }
 
     @Override
     @Transactional
     public void run(String... args) {
-        if (userRepository.count() == 0) {
-            AppUser user = new AppUser();
-            user.setName("Athlete");
-            user.setUnit(Unit.KG);
-            user.setStartDay(1); // Monday
-            userRepository.save(user);
-            log.info("Seeded user profile");
+        if (exerciseRepository.countByUserIdIsNull() == 0) {
+            seedTemplate();
+            log.info("Seeded the default 5-day workout template");
         }
-
-        if (exerciseRepository.count() == 0) {
-            seedSplit();
-            log.info("Seeded the 5-day workout split");
-        }
-
-        if (appMetaRepository.findById("demoSeeded").isEmpty()) {
-            seedDemoData();
-            appMetaRepository.save(new AppMeta("demoSeeded", "true"));
-            log.info("Seeded demo workout history + bodyweight (removable in Profile)");
+        if (seedLegacyDemo && userRepository.count() == 0) {
+            seedLegacyDemoWorld();
+            log.info("Seeded legacy single-user demo world (gymlet.seed-legacy-demo=true)");
         }
     }
 
-    // ------------------------------------------------------------- split
+    // ------------------------------------------------------------- template
 
     private record Seed(String name, MuscleGroup group, int repMin, int repMax, boolean compound, int sets) {
     }
 
-    private void seedSplit() {
+    private void seedTemplate() {
         Map<Integer, List<Seed>> days = Map.of(
                 1, List.of(
                         new Seed("Lat Pulldown", MuscleGroup.BACK, 6, 10, true, 3),
@@ -148,18 +140,19 @@ public class DataSeeder implements CommandLineRunner {
                         new Seed("Reverse Curl", MuscleGroup.FOREARMS, 10, 15, false, 2)));
 
         Map<String, Exercise> byName = new HashMap<>();
-        Map<Integer, WorkoutDay> dayByNumber = new HashMap<>();
-        for (Map.Entry<Integer, List<Seed>> entry : days.entrySet()) {
+        // Iterate days 1..5 in order: shared exercises (e.g. Lat Pulldown,
+        // Incline Bench) keep the Day A rep range, deterministically.
+        for (int dayNumber = 1; dayNumber <= 5; dayNumber++) {
+            List<Seed> seeds = days.get(dayNumber);
             WorkoutDay day = new WorkoutDay();
-            day.setDayNumber(entry.getKey());
-            day.setName(entry.getKey() <= 2
-                    ? (entry.getKey() == 1 ? "Back + Chest A" : "Shoulders + Arms A")
-                    : (entry.getKey() == 3 ? "Legs + Abs"
-                    : (entry.getKey() == 4 ? "Back + Chest B" : "Shoulders + Arms B")));
+            day.setDayNumber(dayNumber);
+            day.setName(dayNumber <= 2
+                    ? (dayNumber == 1 ? "Back + Chest A" : "Shoulders + Arms A")
+                    : (dayNumber == 3 ? "Legs + Abs"
+                    : (dayNumber == 4 ? "Back + Chest B" : "Shoulders + Arms B")));
             workoutDayRepository.save(day);
-            dayByNumber.put(entry.getKey(), day);
-            for (int i = 0; i < entry.getValue().size(); i++) {
-                Seed s = entry.getValue().get(i);
+            for (int i = 0; i < seeds.size(); i++) {
+                Seed s = seeds.get(i);
                 Exercise ex = byName.computeIfAbsent(s.name(), k -> {
                     Exercise e = new Exercise();
                     e.setName(s.name());
@@ -179,26 +172,20 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
-    // ------------------------------------------------------------- demo data
+    // ---------------------------------------------------- legacy demo world
 
-    private void seedDemoData() {
-        AppUser user = userRepository.findAll().get(0);
-        Map<String, Double> baseWeights = Map.ofEntries(
-                Map.entry("Lat Pulldown", 55.0), Map.entry("Mid-Back Row", 35.0),
-                Map.entry("Upper-Back Row", 30.0), Map.entry("Dumbbell Pullover", 20.0),
-                Map.entry("Shrugs", 35.0), Map.entry("Rear Delt Fly", 10.0),
-                Map.entry("Incline Bench", 45.0), Map.entry("Flat Bench", 55.0),
-                Map.entry("Fly", 15.0), Map.entry("Shoulder Press", 27.5),
-                Map.entry("Lateral Raise", 7.5), Map.entry("Curl", 15.0),
-                Map.entry("Hammer Curl", 12.5), Map.entry("Pushdown", 30.0),
-                Map.entry("Overhead Dumbbell Extension", 12.5), Map.entry("Reverse Curl", 10.0),
-                Map.entry("Behind-the-Back Wrist Curl", 10.0), Map.entry("Barbell Squat", 70.0),
-                Map.entry("Romanian Deadlift", 60.0), Map.entry("Leg Extension", 40.0),
-                Map.entry("Hamstring Curl", 35.0), Map.entry("Calf Raise", 55.0),
-                Map.entry("Leg Raise Machine", 15.0), Map.entry("One-Arm Dumbbell Row", 22.5),
-                Map.entry("Incline Dumbbell Curl", 10.0), Map.entry("Dumbbell Shoulder Press", 17.5));
+    /**
+     * Recreates the pre-upgrade single-user state (legacy user with no
+     * credentials + sample history), used only to test the migration path.
+     */
+    private void seedLegacyDemoWorld() {
+        AppUser user = new AppUser();
+        user.setName("Athlete");
+        user.setUnit(Unit.KG);
+        user.setStartDay(1);
+        userRepository.save(user);
 
-        // ~4 weeks of history on training days (never today).
+        List<WorkoutDay> templateDays = workoutDayRepository.findByUserIdIsNullOrderByDayNumberAsc();
         Map<Long, Integer> sessionCountByExercise = new HashMap<>();
         LocalDate today = LocalDate.now();
         for (int back = 27; back >= 1; back--) {
@@ -207,7 +194,7 @@ public class DataSeeder implements CommandLineRunner {
             if (idx >= 5) {
                 continue; // rest day
             }
-            WorkoutDay day = workoutDayRepository.findByDayNumber(idx + 1).orElseThrow();
+            WorkoutDay day = templateDays.get(idx);
 
             WorkoutSession session = new WorkoutSession();
             session.setDate(date);
@@ -226,7 +213,7 @@ public class DataSeeder implements CommandLineRunner {
             for (WorkoutExercise we : wes) {
                 Exercise ex = we.getExercise();
                 int count = sessionCountByExercise.merge(ex.getId(), 1, Integer::sum);
-                double weight = baseWeights.getOrDefault(ex.getName(), 20.0) + 0.5 * (count - 1);
+                double weight = baseWeight(ex.getName()) + 0.5 * (count - 1);
                 int range = ex.getRepMax() - ex.getRepMin() + 1;
                 for (int n = 1; n <= we.getSets(); n++) {
                     int reps = ex.getRepMin()
@@ -245,7 +232,6 @@ public class DataSeeder implements CommandLineRunner {
             }
         }
 
-        // Bodyweight trend over the last ~9 weeks (ends yesterday, never today).
         for (int i = 0; i < 10; i++) {
             LocalDate date = today.minusDays(1).minusDays((long) (9 - i) * 7);
             double wobble = Math.sin(i * 1.7) * 0.2;
@@ -255,5 +241,23 @@ public class DataSeeder implements CommandLineRunner {
             log.setDemo(true);
             bodyWeightRepository.save(log);
         }
+    }
+
+    private double baseWeight(String name) {
+        Map<String, Double> base = Map.ofEntries(
+                Map.entry("Lat Pulldown", 55.0), Map.entry("Mid-Back Row", 35.0),
+                Map.entry("Upper-Back Row", 30.0), Map.entry("Dumbbell Pullover", 20.0),
+                Map.entry("Shrugs", 35.0), Map.entry("Rear Delt Fly", 10.0),
+                Map.entry("Incline Bench", 45.0), Map.entry("Flat Bench", 55.0),
+                Map.entry("Fly", 15.0), Map.entry("Shoulder Press", 27.5),
+                Map.entry("Lateral Raise", 7.5), Map.entry("Curl", 15.0),
+                Map.entry("Hammer Curl", 12.5), Map.entry("Pushdown", 30.0),
+                Map.entry("Overhead Dumbbell Extension", 12.5), Map.entry("Reverse Curl", 10.0),
+                Map.entry("Behind-the-Back Wrist Curl", 10.0), Map.entry("Barbell Squat", 70.0),
+                Map.entry("Romanian Deadlift", 60.0), Map.entry("Leg Extension", 40.0),
+                Map.entry("Hamstring Curl", 35.0), Map.entry("Calf Raise", 55.0),
+                Map.entry("Leg Raise Machine", 15.0), Map.entry("One-Arm Dumbbell Row", 22.5),
+                Map.entry("Incline Dumbbell Curl", 10.0), Map.entry("Dumbbell Shoulder Press", 17.5));
+        return base.getOrDefault(name, 20.0);
     }
 }
