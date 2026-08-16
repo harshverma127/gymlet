@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, clearToken, getToken, setToken, setUnauthorizedHandler } from "./api/client";
+import { ApiError, api, clearToken, getToken, markConnectionUnreachable, setToken, setUnauthorizedHandler } from "./api/client";
 import type { AuthUser, Profile, Unit } from "./types";
 
 /* ------------------------------ auth state ------------------------------ */
@@ -13,6 +13,8 @@ interface AuthState {
   register: (username: string, pin: string) => Promise<void>;
   claim: (username: string, pin: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-runs the startup session check (used by the fallback "Retry now" button). */
+  retryBootstrap: () => void;
 }
 
 const AuthContext = createContext<AuthState>({
@@ -23,12 +25,14 @@ const AuthContext = createContext<AuthState>({
   register: async () => {},
   claim: async () => {},
   logout: async () => {},
+  retryBootstrap: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthState["status"]>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [legacyUsername, setLegacyUsername] = useState<string | null>(null);
+  const [bootstrapTick, setBootstrapTick] = useState(0);
 
   const goOut = useCallback(() => {
     setUser(null);
@@ -39,16 +43,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch(() => setLegacyUsername(null));
   }, []);
 
+  const retryBootstrap = useCallback(() => {
+    setBootstrapTick((t) => t + 1);
+  }, []);
+
   // Session persists in localStorage; verify it against the backend on load.
+  // A temporarily unreachable backend must NOT log the user out — only a real
+  // 401 response means the session is gone. Network failures keep the app in
+  // the "loading" state, where the waking/fallback card is shown instead.
   useEffect(() => {
     let cancelled = false;
     const token = getToken();
     if (!token) {
-      setStatus("out");
       void api
         .authStatus()
-        .then((s) => !cancelled && setLegacyUsername(s.legacyUsername))
-        .catch(() => {});
+        .then((s) => {
+          if (cancelled) return;
+          setLegacyUsername(s.legacyUsername);
+          setStatus("out");
+        })
+        .catch(() => {
+          if (cancelled) return;
+          // Backend unreachable — keep loading so the waking card shows.
+          markConnectionUnreachable();
+        });
       return;
     }
     api
@@ -58,20 +76,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(u);
         setStatus("in");
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
-        clearToken();
-        setUser(null);
-        setStatus("out");
-        void api
-          .authStatus()
-          .then((s) => !cancelled && setLegacyUsername(s.legacyUsername))
-          .catch(() => {});
+        if (err instanceof ApiError && err.status === 401) {
+          // The backend explicitly rejected the session.
+          clearToken();
+          setUser(null);
+          setStatus("out");
+          void api
+            .authStatus()
+            .then((s) => !cancelled && setLegacyUsername(s.legacyUsername))
+            .catch(() => {});
+        } else {
+          // Unreachable or transient error — do NOT log out or clear the token.
+          markConnectionUnreachable();
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [bootstrapTick]);
 
   // Any 401 anywhere in the app means the session is gone -> back to login.
   useEffect(() => {
@@ -126,7 +150,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ status, user, legacyUsername, login, register, claim, logout }}>
+    <AuthContext.Provider
+      value={{ status, user, legacyUsername, login, register, claim, logout, retryBootstrap }}
+    >
       {children}
     </AuthContext.Provider>
   );

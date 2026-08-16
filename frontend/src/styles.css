@@ -2390,6 +2390,102 @@ textarea {
   color: #fff;
 }
 
+/* ------------------------------------------------------------ wake / cold start */
+
+.wake-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--card);
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  animation: pop-in 0.25s ease both;
+}
+
+.wake-art {
+  position: relative;
+  width: 72px;
+  height: 56px;
+  margin-bottom: 6px;
+}
+
+.wake-stem {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 22px;
+  background: var(--sage-deep);
+  border-radius: 2px;
+}
+
+.wake-leaf {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  background: var(--sage);
+  border: 2px solid var(--sage-deep);
+  border-radius: 3px;
+  transform: rotate(45deg);
+}
+
+.wake-leaf.l1 {
+  left: 23px;
+  bottom: 25px;
+}
+
+.wake-leaf.l2 {
+  right: 23px;
+  bottom: 25px;
+}
+
+.wake-pot {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
+  width: 30px;
+  height: 9px;
+  background: var(--peach);
+  border: 2px solid var(--peach-deep);
+  border-radius: 3px;
+}
+
+.wake-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.wake-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.wake-card .btn {
+  margin-top: 8px;
+}
+
+.connection-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 22px 18px;
+  background: rgba(247, 240, 226, 0.92);
+  backdrop-filter: blur(2px);
+  animation: fadeIn 0.15s ease both;
+}
+
 /* ------------------------------------------------------------ misc */
 
 .spinner-wrap {

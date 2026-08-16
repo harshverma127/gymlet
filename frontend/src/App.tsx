@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { ToastProvider } from "./components/Toast";
 import { ProfileProvider, useAuth } from "./state";
@@ -10,6 +11,12 @@ import {
   LogoutIcon,
 } from "./components/Icons";
 import { Spinner } from "./components/ui";
+import {
+  ConnectionOverlay,
+  UnreachableCard,
+  WakingCard,
+  useConnection,
+} from "./components/Connection";
 import { AuthScreen } from "./pages/Auth";
 import { TodayPage } from "./pages/Today";
 import { HistoryPage } from "./pages/History";
@@ -35,20 +42,36 @@ function Logo() {
   );
 }
 
-function LoadingScreen() {
+/**
+ * Shown while the app is deciding who you are. If the backend is asleep it
+ * shows the cute waking card and retries automatically — it never jumps to
+ * the login screen just because the first request couldn't get through.
+ */
+function StartupScreen({ onRetry }: { onRetry: () => void }) {
+  const connection = useConnection();
   return (
     <div className="auth-screen">
       <div className="auth-card-wrap">
         <Logo />
-        <div className="auth-loading">
-          <Spinner label="Loading your gym…" />
-        </div>
+        {connection === "waking" ? (
+          <WakingCard />
+        ) : connection === "unreachable" ? (
+          <UnreachableCard onRetry={onRetry} />
+        ) : (
+          <div className="auth-loading">
+            <Spinner label="Loading your gym…" />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
+  // Bumped by the fallback "Retry now" button so the current page refetches
+  // (without a browser reload) and kicks off a fresh wake attempt.
+  const [pageKey, setPageKey] = useState(0);
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -87,7 +110,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           </button>
         </header>
         <main className="content">
-          <Routes>
+          <Routes key={pageKey}>
             <Route path="/" element={<TodayPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/history/:id" element={<HistoryDetailPage />} />
@@ -104,17 +127,19 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           ))}
         </nav>
       </div>
+
+      <ConnectionOverlay onRetry={() => setPageKey((k) => k + 1)} />
     </div>
   );
 }
 
 export default function App() {
-  const { status, user, logout } = useAuth();
+  const { status, user, logout, retryBootstrap } = useAuth();
 
   if (status === "loading") {
     return (
       <ToastProvider>
-        <LoadingScreen />
+        <StartupScreen onRetry={retryBootstrap} />
       </ToastProvider>
     );
   }
