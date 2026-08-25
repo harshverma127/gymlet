@@ -30,6 +30,12 @@ public class SessionController {
         return sessionService.startToday();
     }
 
+    /** Starts a session for a specific workout day. */
+    @PostMapping("/for-day/{dayId}")
+    public WorkoutDtos.SessionDto startSessionForDay(@PathVariable Long dayId) {
+        return sessionService.startSessionForDay(dayId);
+    }
+
     /** Starts a custom workout — no planned exercises, user adds them freely. */
     @PostMapping("/custom")
     public WorkoutDtos.SessionDto startCustomSession() {

@@ -82,6 +82,12 @@ export interface TodayExercise {
   lastNote: string | null;
 }
 
+export interface WorkoutDaySummary {
+  id: number;
+  dayNumber: number;
+  name: string;
+}
+
 export interface Today {
   isRestDay: boolean;
   dayNumber: number;
@@ -93,6 +99,7 @@ export interface Today {
   nextWorkoutDayId: number | null;
   nextWorkoutDayName: string | null;
   nextDayNumber: number | null;
+  availableDays: WorkoutDaySummary[];
 }
 
 export interface SetLog {

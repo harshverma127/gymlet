@@ -131,6 +131,12 @@ public class StructureService {
                     ex.getId(), ex.getName(), ex.getMuscleGroup().name(), ex.getRepMin(), ex.getRepMax(),
                     ex.isCompound(), we.getSets(), lastSets, suggestion, lastNote));
         }
+        // Available workout days for the selector (all planned days)
+        List<WorkoutDtos.WorkoutDaySummaryDto> availableDays = workoutDayRepository
+                .findAllByUserIdOrderByDayNumberAsc(userContext.getUserId()).stream()
+                .filter(d -> d.getDayNumber() <= 5) // Only planned days, not custom (6)
+                .map(d -> new WorkoutDtos.WorkoutDaySummaryDto(d.getId(), d.getDayNumber(), d.getName()))
+                .toList();
         return new WorkoutDtos.TodayDto(
                 existing == null && (today.getDayOfWeek().getValue() - userContext.getUser().getStartDay() + 7) % 7 >= 5,
                 day.getDayNumber(), day.getId(), day.getName(), exercises,
@@ -138,7 +144,8 @@ public class StructureService {
                 existing != null && existing.isCompleted(),
                 nextDay != null ? nextDay.getId() : null,
                 nextDay != null ? nextDay.getName() : null,
-                nextDay != null ? nextDay.getDayNumber() : null);
+                nextDay != null ? nextDay.getDayNumber() : null,
+                availableDays);
     }
 
     private record LastSessionData(List<SetLog> sets, String note) {

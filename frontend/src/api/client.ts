@@ -311,6 +311,9 @@ export const api = {
   startSession: () =>
     request<Session>("POST", "/api/sessions"),
 
+  startSessionForDay: (dayId: number) =>
+    request<Session>("POST", `/api/sessions/for-day/${dayId}`),
+
   startCustomSession: () =>
     request<Session>("POST", "/api/sessions/custom"),
 

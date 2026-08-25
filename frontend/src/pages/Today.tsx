@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import type { Exercise, FinishSummary, Session, SetLog, Today, TodayExercise } from "../types";
+import type { Exercise, FinishSummary, Session, SetLog, Today, TodayExercise, WorkoutDaySummary } from "../types";
 import { useProfile } from "../state";
 import { toDisplay, toKg, formatVolume } from "../lib/units";
 import { formatDateLong, plural } from "../lib/format";
@@ -41,6 +41,8 @@ export function TodayPage() {
       setError(null);
       if (t.activeSessionId != null) {
         setSession(await api.session(t.activeSessionId));
+      } else {
+        setSession(null);
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
@@ -57,6 +59,19 @@ export function TodayPage() {
     setStarting(true);
     try {
       const s = await api.startSession();
+      setSession(s);
+      toast("Workout started — have fun!");
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't start the workout", "error");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const startForDay = async (dayId: number) => {
+    setStarting(true);
+    try {
+      const s = await api.startSessionForDay(dayId);
       setSession(s);
       toast("Workout started — have fun!");
     } catch (e) {
@@ -119,11 +134,12 @@ export function TodayPage() {
         showFinishConfirm={showFinishConfirm}
         setShowFinishConfirm={setShowFinishConfirm}
         toast={toast}
+        onStartAnother={() => { setSession(null); void load(); }}
       />
     );
   }
 
-  return <ReadyView today={today} unit={unit} starting={starting} onStart={start} onStartCustom={startCustom} />;
+  return <ReadyView today={today} unit={unit} starting={starting} onStart={start} onStartForDay={startForDay} onStartCustom={startCustom} />;
 }
 
 /* ------------------------------ rest day ------------------------------ */
@@ -167,14 +183,18 @@ function ReadyView({
   unit,
   starting,
   onStart,
+  onStartForDay,
   onStartCustom,
 }: {
   today: Today;
   unit: "KG" | "LB";
   starting: boolean;
   onStart: () => void;
+  onStartForDay: (dayId: number) => void;
   onStartCustom: () => void;
 }) {
+  const [selectedDay, setSelectedDay] = useState<number>(today.workoutDayId);
+
   return (
     <div className="page">
       <header className="page-head">
@@ -184,7 +204,33 @@ function ReadyView({
         </div>
       </header>
 
-      <Button size="lg" className="start-btn" onClick={onStart} disabled={starting}>
+      {/* Workout selector */}
+      {today.availableDays && today.availableDays.length > 1 && (
+        <Card className="day-selector-card">
+          <label className="field">
+            <span className="field-label">Choose workout</span>
+            <select
+              className="day-selector"
+              value={selectedDay}
+              onChange={(e) => setSelectedDay(Number(e.target.value))}
+            >
+              {today.availableDays.map((d: WorkoutDaySummary) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} (Day {d.dayNumber})
+                </option>
+              ))}
+            </select>
+          </label>
+        </Card>
+      )}
+
+      <Button size="lg" className="start-btn" onClick={() => {
+        if (selectedDay === today.workoutDayId) {
+          onStart();
+        } else {
+          onStartForDay(selectedDay);
+        }
+      }} disabled={starting}>
         <SparkleIcon size={18} />
         {starting ? "Setting up…" : "Start Workout"}
       </Button>
@@ -221,6 +267,7 @@ interface WorkoutViewProps {
   showFinishConfirm: boolean;
   setShowFinishConfirm: (b: boolean) => void;
   toast: ReturnType<typeof useToast>;
+  onStartAnother: () => void;
 }
 
 function WorkoutView(props: WorkoutViewProps) {
@@ -229,7 +276,7 @@ function WorkoutView(props: WorkoutViewProps) {
   const [showAddExercise, setShowAddExercise] = useState(false);
 
   if (session.completed) {
-    return <CompletedView session={session} summary={summary} unit={unit} onDone={() => navigate("/history")} />;
+    return <CompletedView session={session} summary={summary} unit={unit} onDone={() => navigate("/history")} onStartAnother={props.onStartAnother} />;
   }
 
   const pct = session.totalSets === 0 ? 0 : Math.round((session.completedSets / session.totalSets) * 100);
@@ -237,7 +284,6 @@ function WorkoutView(props: WorkoutViewProps) {
   // Merge planned exercises with any exercises added to the session
   const allExercises = useMemo(() => {
     const planned = new Map(today.exercises.map((e) => [e.exerciseId, e]));
-    // Find exercise IDs in the session that aren't in the planned list
     const extraIds = new Set<number>();
     for (const set of session.sets) {
       if (!planned.has(set.exerciseId)) {
@@ -245,7 +291,6 @@ function WorkoutView(props: WorkoutViewProps) {
       }
     }
     if (extraIds.size === 0) return today.exercises;
-    // Build TodayExercise stubs for added exercises
     const extras: TodayExercise[] = [];
     for (const exId of extraIds) {
       const firstSet = session.sets.find((s) => s.exerciseId === exId);
@@ -265,7 +310,6 @@ function WorkoutView(props: WorkoutViewProps) {
     return [...today.exercises, ...extras];
   }, [today.exercises, session.sets]);
 
-  // Get exercise IDs already in this session
   const sessionExerciseIds = useMemo(() => {
     const ids = new Set<number>();
     for (const set of session.sets) {
@@ -426,7 +470,7 @@ function ExerciseCard({ ex, mode, unit, session, setSession, toast }: ExerciseCa
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
-  const [timerOn, setTimerOn] = useState<number | null>(null); // remaining seconds
+  const [timerOn, setTimerOn] = useState<number | null>(null);
   const [timerKey, setTimerKey] = useState(0);
 
   const note = session?.notes.find((n) => n.exerciseId === ex.exerciseId)?.note ?? ex.lastNote;
@@ -486,12 +530,12 @@ function ExerciseCard({ ex, mode, unit, session, setSession, toast }: ExerciseCa
             {note ? "Notes" : "Note"}
             {note && <span className="note-dot" />}
           </button>
-          {note && !noteOpen && <span className="note-preview">“{note}”</span>}
+          {note && !noteOpen && <span className="note-preview">"{note}"</span>}
         </div>
       ) : (
         note && (
           <p className="last-time note-preview-static">
-            <NoteIcon size={13} /> Last note: “{note}”
+            <NoteIcon size={13} /> Last note: "{note}"
           </p>
         )
       )}
@@ -810,11 +854,13 @@ function CompletedView({
   summary,
   unit,
   onDone,
+  onStartAnother,
 }: {
   session: Session;
   summary: FinishSummary | null;
   unit: "KG" | "LB";
   onDone: () => void;
+  onStartAnother: () => void;
 }) {
   const [confettiBits] = useState(() => [0, 1, 2, 3, 4]);
   return (
@@ -862,11 +908,12 @@ function CompletedView({
           </div>
         )}
 
-        <p className="complete-message">“{summary?.message ?? "Nice session!"}”</p>
+        <p className="complete-message">"{summary?.message ?? "Nice session!"}"</p>
 
         <div className="complete-actions">
           <Button onClick={onDone}>View in History</Button>
-          <Button variant="ghost" onClick={() => window.location.reload()}>Back to Today</Button>
+          <Button variant="secondary" onClick={onStartAnother}>Start Another Workout</Button>
+          <Button variant="ghost" onClick={() => { onDone(); }}>Back to Today</Button>
         </div>
       </Card>
     </div>

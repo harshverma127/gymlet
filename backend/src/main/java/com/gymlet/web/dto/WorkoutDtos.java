@@ -38,7 +38,12 @@ public final class WorkoutDtos {
 
     public record TodayDto(Boolean isRestDay, Integer dayNumber, Long workoutDayId, String workoutDayName,
                            List<TodayExerciseDto> exercises, Long activeSessionId, Boolean completed,
-                           Long nextWorkoutDayId, String nextWorkoutDayName, Integer nextDayNumber) {
+                           Long nextWorkoutDayId, String nextWorkoutDayName, Integer nextDayNumber,
+                           List<WorkoutDaySummaryDto> availableDays) {
+    }
+
+    /** Lightweight workout day info for the day selector. */
+    public record WorkoutDaySummaryDto(Long id, Integer dayNumber, String name) {
     }
 
     public record SetDto(Long id, Long exerciseId, String exerciseName, Integer setNumber,

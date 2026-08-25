@@ -68,9 +68,6 @@ public class SessionService {
         if (idx >= 5) {
             throw new IllegalArgumentException("It's a rest day — enjoy the break!");
         }
-        if (sessionRepository.findFirstByUserIdAndDate(user.getId(), today).isPresent()) {
-            throw new IllegalArgumentException("You already have a session for today");
-        }
 
         WorkoutDay day = workoutDayRepository.findByUserIdAndDayNumber(user.getId(), idx + 1)
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
@@ -138,9 +135,6 @@ public class SessionService {
     public WorkoutDtos.SessionDto startCustomSession() {
         AppUser user = userContext.getUser();
         LocalDate today = LocalDate.now();
-        if (sessionRepository.findFirstByUserIdAndDate(user.getId(), today).isPresent()) {
-            throw new IllegalArgumentException("You already have a session for today");
-        }
         WorkoutDay customDay = getOrCreateCustomDay();
         WorkoutSession session = new WorkoutSession();
         session.setUserId(user.getId());
@@ -195,6 +189,54 @@ public class SessionService {
             setLogRepository.save(sl);
         }
         return getSession(sessionId);
+    }
+
+    /** Starts a session for a specific workout day (allows choosing any planned workout). */
+    @Transactional
+    public WorkoutDtos.SessionDto startSessionForDay(Long workoutDayId) {
+        AppUser user = userContext.getUser();
+        LocalDate today = LocalDate.now();
+        WorkoutDay day = workoutDayRepository.findByIdAndUserId(workoutDayId, user.getId())
+                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+
+        WorkoutSession session = new WorkoutSession();
+        session.setUserId(user.getId());
+        session.setDate(today);
+        session.setWorkoutDay(day);
+        session.setStartedAt(LocalDateTime.now());
+        session.setCompleted(false);
+        session.setDemo(false);
+        sessionRepository.save(session);
+
+        // Pre-fill weight/reps from the last completed session for this day.
+        Map<Long, Map<Integer, Double[]>> prefill = new HashMap<>();
+        WorkoutSession last = previousSessionOfDay(day, null);
+        if (last != null) {
+            for (SetLog sl : setLogRepository.findBySession(last)) {
+                if (sl.getWeight() != null && sl.getReps() != null) {
+                    prefill.computeIfAbsent(sl.getExercise().getId(), k -> new HashMap<>())
+                            .put(sl.getSetNumber(), new Double[]{sl.getWeight(), (double) sl.getReps()});
+                }
+            }
+        }
+
+        for (WorkoutExercise we : workoutExerciseRepository.findByWorkoutDayIdOrderBySetOrderAsc(day.getId())) {
+            Map<Integer, Double[]> prev = prefill.get(we.getExercise().getId());
+            for (int n = 1; n <= we.getSets(); n++) {
+                SetLog sl = new SetLog();
+                sl.setSession(session);
+                sl.setExercise(we.getExercise());
+                sl.setSetNumber(n);
+                sl.setCompleted(false);
+                if (prev != null && prev.containsKey(n)) {
+                    Double[] vals = prev.get(n);
+                    sl.setWeight(vals[0]);
+                    sl.setReps(vals[1].intValue());
+                }
+                setLogRepository.save(sl);
+            }
+        }
+        return getSession(session.getId());
     }
 
     // -------------------------------------------------------------- reads
