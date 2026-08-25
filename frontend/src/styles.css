@@ -1610,6 +1610,103 @@ textarea {
   align-self: center;
 }
 
+/* ------------------------------------------------------------ edit workout */
+
+.edit-workout-btn {
+  align-self: center;
+  margin-bottom: 4px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.edit-set-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.edit-set-fields {
+  display: flex;
+  gap: 6px;
+}
+
+.edit-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.edit-field-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.edit-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.edit-input:focus {
+  border-color: var(--sage);
+}
+
+/* Remove spinner arrows on number inputs for cleaner mobile look */
+.edit-input::-webkit-outer-spin-button,
+.edit-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.edit-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.edit-note-field {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.edit-note-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--ink);
+  outline: none;
+  box-sizing: border-box;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+
+.edit-note-input:focus {
+  border-color: var(--sage);
+}
+
 /* ------------------------------------------------------------ progress */
 
 .ex-select-row {
@@ -2582,6 +2679,101 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ------------------------------------------------------------ add exercise + custom workout */
+
+.custom-start-btn {
+  margin-top: 8px;
+}
+
+.add-exercise-btn {
+  align-self: center;
+  margin: 4px 0;
+  font-size: 0.9rem;
+}
+
+.add-exercise-btn span {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/* exercise search modal */
+
+.exercise-search-modal {
+  max-width: 400px;
+  width: 100%;
+}
+
+.exercise-search-input {
+  width: 100%;
+  border: 2px solid var(--line);
+  background: #fffdf6;
+  border-radius: 9px;
+  padding: 11px 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.15s;
+  margin-bottom: 10px;
+}
+
+.exercise-search-input:focus {
+  border-color: var(--sage);
+}
+
+.exercise-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.exercise-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 2px solid var(--line);
+  background: #fffdf6;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.exercise-search-item:hover {
+  background: var(--sage-light);
+  border-color: #c3ddca;
+}
+
+.exercise-search-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.exercise-search-group {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: var(--card-warm);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.exercise-search-empty {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  padding: 20px 0;
+}
+
+/* day reorder arrows */
+
+.split-day-reorder {
+  display: flex;
+  gap: 2px;
 }
 
 /* ------------------------------------------------------------ desktop */

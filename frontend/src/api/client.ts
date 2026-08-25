@@ -301,9 +301,28 @@ export const api = {
       `/api/workout-exercises/${id}`
     ),
 
+  swapDays: (fromId: number, toId: number) =>
+    request<void>(
+      "PUT",
+      `/api/workout-days/swap?from=${fromId}&to=${toId}`
+    ),
+
   // sessions
   startSession: () =>
     request<Session>("POST", "/api/sessions"),
+
+  startCustomSession: () =>
+    request<Session>("POST", "/api/sessions/custom"),
+
+  addExerciseToSession: (
+    sessionId: number,
+    exerciseId: number,
+    sets: number = 3
+  ) =>
+    request<Session>(
+      "POST",
+      `/api/sessions/${sessionId}/exercises/${exerciseId}?sets=${sets}`
+    ),
 
   session: (id: number) =>
     request<Session>("GET", `/api/sessions/${id}`),

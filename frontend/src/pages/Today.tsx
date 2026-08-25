@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import type { FinishSummary, Session, SetLog, Today, TodayExercise } from "../types";
+import type { Exercise, FinishSummary, Session, SetLog, Today, TodayExercise } from "../types";
 import { useProfile } from "../state";
 import { toDisplay, toKg, formatVolume } from "../lib/units";
 import { formatDateLong, plural } from "../lib/format";
@@ -66,6 +66,19 @@ export function TodayPage() {
     }
   };
 
+  const startCustom = async () => {
+    setStarting(true);
+    try {
+      const s = await api.startCustomSession();
+      setSession(s);
+      toast("Custom workout started — add exercises!");
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't start custom workout", "error");
+    } finally {
+      setStarting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page">
@@ -89,7 +102,7 @@ export function TodayPage() {
   if (!today) return null;
 
   if (today.isRestDay && !session) {
-    return <RestDayView today={today} unit={unit} />;
+    return <RestDayView today={today} unit={unit} starting={starting} onStartCustom={startCustom} />;
   }
 
   if (session) {
@@ -110,12 +123,12 @@ export function TodayPage() {
     );
   }
 
-  return <ReadyView today={today} unit={unit} starting={starting} onStart={start} />;
+  return <ReadyView today={today} unit={unit} starting={starting} onStart={start} onStartCustom={startCustom} />;
 }
 
 /* ------------------------------ rest day ------------------------------ */
 
-function RestDayView({ today, unit }: { today: Today; unit: "KG" | "LB" }) {
+function RestDayView({ today, unit, starting, onStartCustom }: { today: Today; unit: "KG" | "LB"; starting: boolean; onStartCustom: () => void }) {
   return (
     <div className="page">
       <Card className="rest-card">
@@ -128,6 +141,11 @@ function RestDayView({ today, unit }: { today: Today; unit: "KG" | "LB" }) {
         <h1 className="rest-title">Rest day 🌿</h1>
         <p className="rest-sub">Muscles grow while you rest. Enjoy the break!</p>
       </Card>
+
+      <Button size="lg" className="start-btn custom-start-btn" onClick={onStartCustom} disabled={starting}>
+        <SparkleIcon size={18} />
+        {starting ? "Setting up…" : "Start Custom Workout"}
+      </Button>
 
       <div className="section-head">
         <h2>Up next</h2>
@@ -149,11 +167,13 @@ function ReadyView({
   unit,
   starting,
   onStart,
+  onStartCustom,
 }: {
   today: Today;
   unit: "KG" | "LB";
   starting: boolean;
   onStart: () => void;
+  onStartCustom: () => void;
 }) {
   return (
     <div className="page">
@@ -167,6 +187,11 @@ function ReadyView({
       <Button size="lg" className="start-btn" onClick={onStart} disabled={starting}>
         <SparkleIcon size={18} />
         {starting ? "Setting up…" : "Start Workout"}
+      </Button>
+
+      <Button size="lg" variant="secondary" className="start-btn custom-start-btn" onClick={onStartCustom} disabled={starting}>
+        <SparkleIcon size={18} />
+        {starting ? "Setting up…" : "Start Custom Workout"}
       </Button>
 
       <p className="page-hint">Tap start and the app pre-fills last week's weights — just log and go.</p>
@@ -201,12 +226,53 @@ interface WorkoutViewProps {
 function WorkoutView(props: WorkoutViewProps) {
   const { today, session, unit, summary, finishing, showFinishConfirm } = props;
   const navigate = useNavigate();
+  const [showAddExercise, setShowAddExercise] = useState(false);
 
   if (session.completed) {
     return <CompletedView session={session} summary={summary} unit={unit} onDone={() => navigate("/history")} />;
   }
 
   const pct = session.totalSets === 0 ? 0 : Math.round((session.completedSets / session.totalSets) * 100);
+
+  // Merge planned exercises with any exercises added to the session
+  const allExercises = useMemo(() => {
+    const planned = new Map(today.exercises.map((e) => [e.exerciseId, e]));
+    // Find exercise IDs in the session that aren't in the planned list
+    const extraIds = new Set<number>();
+    for (const set of session.sets) {
+      if (!planned.has(set.exerciseId)) {
+        extraIds.add(set.exerciseId);
+      }
+    }
+    if (extraIds.size === 0) return today.exercises;
+    // Build TodayExercise stubs for added exercises
+    const extras: TodayExercise[] = [];
+    for (const exId of extraIds) {
+      const firstSet = session.sets.find((s) => s.exerciseId === exId);
+      extras.push({
+        exerciseId: exId,
+        name: firstSet?.exerciseName ?? "Exercise",
+        muscleGroup: "BACK",
+        repMin: 8,
+        repMax: 12,
+        compound: false,
+        sets: session.sets.filter((s) => s.exerciseId === exId).length,
+        lastSets: [],
+        suggestion: null,
+        lastNote: null,
+      });
+    }
+    return [...today.exercises, ...extras];
+  }, [today.exercises, session.sets]);
+
+  // Get exercise IDs already in this session
+  const sessionExerciseIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const set of session.sets) {
+      ids.add(set.exerciseId);
+    }
+    return ids;
+  }, [session.sets]);
 
   return (
     <div className="page">
@@ -227,9 +293,30 @@ function WorkoutView(props: WorkoutViewProps) {
         <SegmentedProgress value={session.completedSets} max={session.totalSets} />
       </Card>
 
-      {today.exercises.map((ex) => (
+      {allExercises.map((ex) => (
         <ExerciseCard key={ex.exerciseId} {...props} ex={ex} mode="active" unit={unit} />
       ))}
+
+      <Button variant="secondary" className="add-exercise-btn" onClick={() => setShowAddExercise(true)}>
+        <span>+</span> Add Exercise
+      </Button>
+
+      {showAddExercise && (
+        <ExerciseSearchModal
+          excludeIds={sessionExerciseIds}
+          onSelect={async (exercise) => {
+            try {
+              const updated = await api.addExerciseToSession(session.id, exercise.id, 3);
+              props.setSession(updated);
+              setShowAddExercise(false);
+              props.toast(`Added ${exercise.name} — 3 sets ready`);
+            } catch (e) {
+              props.toast(e instanceof ApiError ? e.message : "Couldn't add exercise", "error");
+            }
+          }}
+          onClose={() => setShowAddExercise(false)}
+        />
+      )}
 
       <Button size="lg" className="finish-btn" variant="secondary" onClick={() => props.setShowFinishConfirm(true)}>
         <span className="finish-flag">🏁</span> Finish Workout
@@ -634,6 +721,84 @@ function RestTimer({ initial, onClose, onFinished }: { initial: number; onClose:
       <button className="rest-btn" onClick={onClose} aria-label="Close timer">
         <XIcon size={14} />
       </button>
+    </div>
+  );
+}
+
+/* ---------------------------- exercise search modal ---------------------------- */
+
+function ExerciseSearchModal({
+  excludeIds,
+  onSelect,
+  onClose,
+}: {
+  excludeIds: Set<number>;
+  onSelect: (exercise: Exercise) => void;
+  onClose: () => void;
+}) {
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setExercises(await api.exercises());
+      } catch {
+        /* ignore */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return exercises
+      .filter((e) => !excludeIds.has(e.id))
+      .filter((e) => !q || e.name.toLowerCase().includes(q) || e.muscleGroup.toLowerCase().includes(q));
+  }, [exercises, search, excludeIds]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal exercise-search-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3 className="modal-title">Add Exercise</h3>
+        </div>
+        <div className="modal-body">
+          <input
+            className="exercise-search-input"
+            type="text"
+            placeholder="Search exercises…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            autoFocus
+          />
+          {loading ? (
+            <p className="exercise-search-empty">Loading…</p>
+          ) : filtered.length === 0 ? (
+            <p className="exercise-search-empty">No exercises found</p>
+          ) : (
+            <div className="exercise-search-list">
+              {filtered.map((ex) => (
+                <button
+                  key={ex.id}
+                  className="exercise-search-item"
+                  onClick={() => onSelect(ex)}
+                >
+                  <span className="exercise-search-name">{ex.name}</span>
+                  <span className="exercise-search-group">
+                    {titleCase(ex.muscleGroup)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
     </div>
   );
 }

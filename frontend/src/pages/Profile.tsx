@@ -39,6 +39,15 @@ export function ProfilePage() {
     }
   }, [toast]);
 
+  const swapDays = async (fromId: number, toId: number) => {
+    try {
+      await api.swapDays(fromId, toId);
+      await loadStructure();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "Couldn't reorder", "error");
+    }
+  };
+
   useEffect(() => {
     void loadStructure();
   }, [loadStructure]);
@@ -116,7 +125,7 @@ export function ProfilePage() {
           <Skeleton lines={5} />
         ) : (
           <div className="split-list">
-            {days.map((day) => (
+            {days.map((day, idx) => (
               <div key={day.id} className="split-day">
                 <button
                   className="split-day-head"
@@ -125,6 +134,34 @@ export function ProfilePage() {
                   <span className="split-day-num">D{day.dayNumber}</span>
                   <span className="split-day-name">{day.name}</span>
                   <span className="split-day-count">{day.exercises.length} exercises</span>
+                  <div className="split-day-reorder">
+                    {idx > 0 && (
+                      <button
+                        className="icon-btn icon-btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void swapDays(day.id, days[idx - 1].id);
+                        }}
+                        aria-label="Move up"
+                        title="Move up"
+                      >
+                        ↑
+                      </button>
+                    )}
+                    {idx < days.length - 1 && (
+                      <button
+                        className="icon-btn icon-btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void swapDays(day.id, days[idx + 1].id);
+                        }}
+                        aria-label="Move down"
+                        title="Move down"
+                      >
+                        ↓
+                      </button>
+                    )}
+                  </div>
                   <ChevronDownIcon size={15} className={expandedDay === day.id ? "rotated" : ""} />
                 </button>
                 {expandedDay === day.id && (

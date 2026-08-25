@@ -73,7 +73,12 @@ export function HistoryPage() {
                   </span>
                   {item.demo && <span className="pill pill-peach">sample</span>}
                 </div>
-                <h3 className="history-name">{item.workoutDayName}</h3>
+                <h3 className="history-name">
+                  {item.workoutDayName}
+                  {item.workoutDayName === "Custom Workout" && (
+                    <span className="pill pill-blue">custom</span>
+                  )}
+                </h3>
                 <div className="history-stats">
                   <span>{item.setsCompleted} sets</span>
                   <span>·</span>

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -27,6 +28,21 @@ public class SessionController {
     @PostMapping
     public WorkoutDtos.SessionDto startToday() {
         return sessionService.startToday();
+    }
+
+    /** Starts a custom workout — no planned exercises, user adds them freely. */
+    @PostMapping("/custom")
+    public WorkoutDtos.SessionDto startCustomSession() {
+        return sessionService.startCustomSession();
+    }
+
+    /** Adds an exercise to an active session. */
+    @PostMapping("/{sessionId}/exercises/{exerciseId}")
+    public WorkoutDtos.SessionDto addExerciseToSession(
+            @PathVariable Long sessionId,
+            @PathVariable Long exerciseId,
+            @RequestParam(defaultValue = "3") int sets) {
+        return sessionService.addExerciseToSession(sessionId, exerciseId, sets);
     }
 
     @GetMapping

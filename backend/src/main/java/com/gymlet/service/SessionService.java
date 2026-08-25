@@ -115,6 +115,88 @@ public class SessionService {
         return getSession(session.getId());
     }
 
+    // ------------------------------------------------------------ custom
+
+    private static final int CUSTOM_DAY_NUMBER = 6;
+    private static final String CUSTOM_DAY_NAME = "Custom Workout";
+
+    /** Gets or creates the single "Custom Workout" day for this user (dayNumber=6). */
+    private WorkoutDay getOrCreateCustomDay() {
+        Long userId = userContext.getUserId();
+        return workoutDayRepository.findByUserIdAndDayNumber(userId, CUSTOM_DAY_NUMBER)
+                .orElseGet(() -> {
+                    WorkoutDay custom = new WorkoutDay();
+                    custom.setUserId(userId);
+                    custom.setName(CUSTOM_DAY_NAME);
+                    custom.setDayNumber(CUSTOM_DAY_NUMBER);
+                    return workoutDayRepository.save(custom);
+                });
+    }
+
+    /** Starts a custom workout — no planned exercises, user adds them freely. */
+    @Transactional
+    public WorkoutDtos.SessionDto startCustomSession() {
+        AppUser user = userContext.getUser();
+        LocalDate today = LocalDate.now();
+        if (sessionRepository.findFirstByUserIdAndDate(user.getId(), today).isPresent()) {
+            throw new IllegalArgumentException("You already have a session for today");
+        }
+        WorkoutDay customDay = getOrCreateCustomDay();
+        WorkoutSession session = new WorkoutSession();
+        session.setUserId(user.getId());
+        session.setDate(today);
+        session.setWorkoutDay(customDay);
+        session.setStartedAt(LocalDateTime.now());
+        session.setCompleted(false);
+        session.setDemo(false);
+        sessionRepository.save(session);
+        return getSession(session.getId());
+    }
+
+    /** Adds an exercise to an active session with pre-filled sets from last time. */
+    @Transactional
+    public WorkoutDtos.SessionDto addExerciseToSession(Long sessionId, Long exerciseId, int sets) {
+        WorkoutSession s = requireSession(sessionId);
+        if (s.isCompleted()) {
+            throw new IllegalArgumentException("This workout is already finished");
+        }
+        Exercise ex = exerciseRepository.findByIdAndUserId(exerciseId, userContext.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("Exercise not found"));
+        // Check if exercise is already in this session
+        List<SetLog> existing = setLogRepository.findBySessionIdAndExerciseIdOrderBySetNumberAsc(sessionId, exerciseId);
+        if (!existing.isEmpty()) {
+            throw new IllegalArgumentException("That exercise is already in this workout");
+        }
+        // Find last weight/reps for this exercise across history
+        Map<Integer, Double[]> prefill = new HashMap<>();
+        List<WorkoutSession> completed = sessionRepository.findByUserIdAndCompletedTrueOrderByDateDesc(userContext.getUserId());
+        for (WorkoutSession cs : completed) {
+            List<SetLog> logs = setLogRepository.findBySessionIdAndExerciseIdOrderBySetNumberAsc(cs.getId(), exerciseId);
+            if (!logs.isEmpty()) {
+                for (SetLog sl : logs) {
+                    if (sl.getWeight() != null && sl.getReps() != null) {
+                        prefill.putIfAbsent(sl.getSetNumber(), new Double[]{sl.getWeight(), (double) sl.getReps()});
+                    }
+                }
+                break; // Use the most recent session
+            }
+        }
+        for (int n = 1; n <= sets; n++) {
+            SetLog sl = new SetLog();
+            sl.setSession(s);
+            sl.setExercise(ex);
+            sl.setSetNumber(n);
+            sl.setCompleted(false);
+            Double[] prev = prefill.get(n);
+            if (prev != null) {
+                sl.setWeight(prev[0]);
+                sl.setReps(prev[1].intValue());
+            }
+            setLogRepository.save(sl);
+        }
+        return getSession(sessionId);
+    }
+
     // -------------------------------------------------------------- reads
 
     @Transactional(readOnly = true)
@@ -152,9 +234,6 @@ public class SessionService {
     @Transactional
     public WorkoutDtos.SessionDto updateSet(Long sessionId, Long setId, WorkoutDtos.SetUpdateRequest req) {
         WorkoutSession s = requireSession(sessionId);
-        if (s.isCompleted()) {
-            throw new IllegalArgumentException("This workout is already finished");
-        }
         SetLog sl = setLogRepository.findById(setId)
                 .orElseThrow(() -> new NoSuchElementException("Set not found"));
         if (!sl.getSession().getId().equals(sessionId)) {
@@ -177,9 +256,6 @@ public class SessionService {
     @Transactional
     public WorkoutDtos.SessionDto upsertNote(Long sessionId, Long exerciseId, WorkoutDtos.NoteRequest req) {
         WorkoutSession s = requireSession(sessionId);
-        if (s.isCompleted()) {
-            throw new IllegalArgumentException("This workout is already finished");
-        }
         String note = req.note() == null ? "" : req.note().trim();
         ExerciseNote en = exerciseNoteRepository.findBySessionAndExerciseId(s, exerciseId)
                 .orElse(null);

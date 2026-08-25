@@ -251,3 +251,24 @@ export function ChevronDownIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function EditIcon(props: IconProps) {
+  const { size, ...rest } = props;
+  return (
+    <svg {...base(size, rest)}>
+      <path d="M15.5 5.5l3 3L8 19H5v-3z" />
+      <path d="M12.5 8.5l3 3" />
+    </svg>
+  );
+}
+
+export function SaveIcon(props: IconProps) {
+  const { size, ...rest } = props;
+  return (
+    <svg {...base(size, rest)}>
+      <rect x="4" y="3" width="16" height="18" rx="1" />
+      <path d="M8 3v6h8V3" />
+      <path d="M8 15h8" />
+    </svg>
+  );
+}

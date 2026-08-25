@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -76,5 +77,10 @@ public class WorkoutController {
     @DeleteMapping("/workout-exercises/{id}")
     public WorkoutDtos.WorkoutDayDto removeExerciseFromDay(@PathVariable Long id) {
         return structureService.removeExerciseFromDay(id);
+    }
+
+    @PutMapping("/workout-days/swap")
+    public void swapDays(@RequestParam Long from, @RequestParam Long to) {
+        structureService.swapDayNumbers(from, to);
     }
 }

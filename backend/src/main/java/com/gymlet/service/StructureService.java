@@ -297,6 +297,26 @@ public class StructureService {
         }
     }
 
+    // ------------------------------------------------------------ reschedule
+
+    /**
+     * Swaps the dayNumber of two workout days. This reorders the weekly schedule
+     * without affecting any historical workout sessions.
+     */
+    @Transactional
+    public void swapDayNumbers(Long dayId1, Long dayId2) {
+        WorkoutDay d1 = workoutDayRepository.findByIdAndUserId(dayId1, userContext.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        WorkoutDay d2 = workoutDayRepository.findByIdAndUserId(dayId2, userContext.getUserId())
+                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        if (d1.getDayNumber().equals(d2.getDayNumber())) return;
+        int tmp = d1.getDayNumber();
+        d1.setDayNumber(d2.getDayNumber());
+        d2.setDayNumber(tmp);
+        workoutDayRepository.save(d1);
+        workoutDayRepository.save(d2);
+    }
+
     // ---------------------------------------------------------------- mapping
 
     public WorkoutDtos.WorkoutDayDto toWorkoutDayDto(WorkoutDay day) {
