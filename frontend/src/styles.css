@@ -450,6 +450,334 @@ textarea {
   padding: 18px;
 }
 
+/* ------------------------------------------------------------ plans + schedule */
+
+.plan-switcher {
+  position: relative;
+  z-index: 5;
+}
+
+.plan-switcher-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  color: var(--ink);
+  background: linear-gradient(120deg, var(--card) 0%, #f5f0df 100%);
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  text-align: left;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.plan-switcher-trigger:hover,
+.plan-switcher-trigger[aria-expanded="true"] {
+  border-color: var(--sage-deep);
+  transform: translateY(-1px);
+}
+
+.plan-switcher-mark {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--sage-deep);
+  background: var(--sage-light);
+  border-radius: 9px;
+}
+
+.plan-switcher-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-switcher-copy .eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+}
+
+.plan-switcher-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-switcher-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  right: 0;
+  padding: 6px;
+  background: var(--card);
+  border: 2px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  animation: fadeUp 0.15s ease both;
+}
+
+.plan-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.plan-option:hover:not(:disabled),
+.plan-option.is-active {
+  background: var(--sage-light);
+  color: var(--sage-deep);
+}
+
+.plan-option.is-archived {
+  color: var(--ink-soft);
+  opacity: 0.65;
+}
+
+.plan-option span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-option small {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.plan-switcher-skeleton {
+  min-height: 66px;
+}
+
+.plans-card,
+.schedule-card {
+  overflow: visible;
+}
+
+.plans-card .section-title-row,
+.schedule-card .section-title-row {
+  align-items: flex-start;
+}
+
+.plans-card .section-title,
+.schedule-card .section-title {
+  margin-top: 2px;
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.plan-management-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 11px;
+  background: #fffdf6;
+}
+
+.plan-management-row.is-active {
+  border-color: #b5d1bd;
+  background: var(--sage-light);
+}
+
+.plan-management-row.is-archived {
+  opacity: 0.68;
+}
+
+.plan-management-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--blue-deep);
+  background: var(--blue-light);
+  border-radius: 9px;
+}
+
+.plan-management-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-name-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.plan-name-line strong,
+.plan-management-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-management-copy > span {
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+}
+
+.plan-row-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.plan-empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 5px;
+  padding: 20px 12px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.plan-empty svg {
+  color: var(--gold);
+  margin-bottom: 3px;
+}
+
+.plan-empty strong {
+  color: var(--ink);
+}
+
+.plan-empty span,
+.schedule-intro {
+  font-size: 0.78rem;
+}
+
+.plan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.field-optional {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+.schedule-intro {
+  margin: -4px 0 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.schedule-day {
+  min-width: 0;
+  padding: 11px;
+  border: 1.5px solid var(--line);
+  border-radius: 11px;
+  background: #fffdf6;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.schedule-day.is-today {
+  border-color: var(--peach-deep);
+  box-shadow: 0 0 0 3px rgba(240, 196, 160, 0.25);
+}
+
+.schedule-day.is-rest {
+  background: var(--card-warm);
+}
+
+.schedule-day-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.schedule-weekday {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.schedule-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.schedule-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--sage-deep);
+}
+
+.is-rest .schedule-dot {
+  background: var(--ink-soft);
+}
+
+.schedule-day select {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 0.76rem;
+}
+
+.schedule-day select:focus {
+  border-color: var(--sage);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(127, 169, 140, 0.2);
+}
+
+.schedule-saving {
+  display: block;
+  margin-top: 5px;
+  color: var(--sage-deep);
+  font-size: 0.68rem;
+}
+
 .card-error {
   display: flex;
   flex-direction: column;
@@ -2817,6 +3145,38 @@ textarea {
 
   .field-full {
     grid-column: 1 / -1;
+  }
+
+  .schedule-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .schedule-day {
+    padding: 9px 7px;
+  }
+
+  .schedule-day-top {
+    display: block;
+    min-height: 23px;
+  }
+
+  .schedule-day-top .pill {
+    display: block;
+    width: max-content;
+    margin-top: 4px;
+    font-size: 0.58rem;
+  }
+
+  .schedule-status {
+    align-items: flex-start;
+    min-height: 48px;
+    font-size: 0.72rem;
+  }
+
+  .schedule-day select {
+    padding: 6px 4px;
+    font-size: 0.68rem;
   }
 }
 

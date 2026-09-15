@@ -32,6 +32,10 @@ public class WorkoutSession {
     @JoinColumn(name = "workout_day_id")
     private WorkoutDay workoutDay;
 
+    /** Snapshot of the workout day name when the session was started (historical label). */
+    @Column(name = "workout_day_name_snapshot")
+    private String workoutDayNameSnapshot;
+
     @Column(nullable = false)
     private LocalDateTime startedAt;
 
@@ -72,6 +76,14 @@ public class WorkoutSession {
 
     public void setWorkoutDay(WorkoutDay workoutDay) {
         this.workoutDay = workoutDay;
+    }
+
+    public String getWorkoutDayNameSnapshot() {
+        return workoutDayNameSnapshot;
+    }
+
+    public void setWorkoutDayNameSnapshot(String workoutDayNameSnapshot) {
+        this.workoutDayNameSnapshot = workoutDayNameSnapshot;
     }
 
     public LocalDateTime getStartedAt() {

@@ -10,8 +10,11 @@ import type {
   HistoryItem,
   LoginResponse,
   MuscleVolume,
+  PlanList,
+  PlanSummary,
   PrSummary,
   Profile,
+  ScheduleDay,
   Session,
   Today,
   WorkoutDay,
@@ -268,6 +271,30 @@ export const api = {
 
   workoutDay: (id: number) =>
     request<WorkoutDay>("GET", `/api/workout-days/${id}`),
+
+  // plans + schedule
+  plans: () => request<PlanList>("GET", "/api/plans"),
+
+  createPlan: (body: { name: string; description?: string; goal?: string }) =>
+    request<PlanSummary>("POST", "/api/plans", body),
+
+  updatePlan: (id: number, body: { name?: string; description?: string; goal?: string }) =>
+    request<PlanSummary>("PUT", `/api/plans/${id}`, body),
+
+  copyPlan: (id: number) =>
+    request<PlanSummary>("POST", `/api/plans/${id}/copy`),
+
+  activatePlan: (id: number) =>
+    request<PlanSummary>("POST", `/api/plans/${id}/activate`),
+
+  archivePlan: (id: number) =>
+    request<PlanSummary>("POST", `/api/plans/${id}/archive`),
+
+  assignScheduleDay: (planId: number, weekday: number, workoutDayId: number) =>
+    request<ScheduleDay>("PUT", `/api/plans/${planId}/schedule/${weekday}`, { workoutDayId }),
+
+  setScheduleRest: (planId: number, weekday: number) =>
+    request<ScheduleDay>("PUT", `/api/plans/${planId}/schedule/${weekday}/rest`),
 
   exercises: () =>
     request<Exercise[]>("GET", "/api/exercises"),

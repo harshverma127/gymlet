@@ -34,6 +34,14 @@ public class WorkoutExercise {
     @Column(nullable = false)
     private Integer sets;
 
+    /** Optional target reps in reserve for this slot in the plan. */
+    @Column(name = "target_rir")
+    private Integer targetRir;
+
+    /** Optional rest timer override in seconds between sets. */
+    @Column(name = "rest_seconds")
+    private Integer restSeconds;
+
     public Long getId() {
         return id;
     }
@@ -68,5 +76,21 @@ public class WorkoutExercise {
 
     public void setSets(Integer sets) {
         this.sets = sets;
+    }
+
+    public Integer getTargetRir() {
+        return targetRir;
+    }
+
+    public void setTargetRir(Integer targetRir) {
+        this.targetRir = targetRir;
+    }
+
+    public Integer getRestSeconds() {
+        return restSeconds;
+    }
+
+    public void setRestSeconds(Integer restSeconds) {
+        this.restSeconds = restSeconds;
     }
 }

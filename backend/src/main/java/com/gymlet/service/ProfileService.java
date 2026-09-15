@@ -10,6 +10,7 @@ import com.gymlet.repository.BodyWeightLogRepository;
 import com.gymlet.repository.ExerciseNoteRepository;
 import com.gymlet.repository.SetLogRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
+import com.gymlet.repository.WorkoutPlanRepository;
 import com.gymlet.web.dto.Requests;
 import com.gymlet.web.dto.StatsDtos;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class ProfileService {
     private final SetLogRepository setLogRepository;
     private final ExerciseNoteRepository exerciseNoteRepository;
     private final WorkoutSessionRepository sessionRepository;
+    private final WorkoutPlanRepository planRepository;
     private final StructureService structureService;
     private final ObjectMapper objectMapper;
 
@@ -37,6 +39,7 @@ public class ProfileService {
                           SetLogRepository setLogRepository,
                           ExerciseNoteRepository exerciseNoteRepository,
                           WorkoutSessionRepository sessionRepository,
+                          WorkoutPlanRepository planRepository,
                           StructureService structureService,
                           ObjectMapper objectMapper) {
         this.userContext = userContext;
@@ -45,6 +48,7 @@ public class ProfileService {
         this.setLogRepository = setLogRepository;
         this.exerciseNoteRepository = exerciseNoteRepository;
         this.sessionRepository = sessionRepository;
+        this.planRepository = planRepository;
         this.structureService = structureService;
         this.objectMapper = objectMapper;
     }
@@ -52,7 +56,7 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public StatsDtos.ProfileDto getProfile() {
         AppUser user = userContext.getUser();
-        return new StatsDtos.ProfileDto(user.getName(), user.getUnit().name(), user.getStartDay());
+        return toProfileDto(user);
     }
 
     @Transactional
@@ -62,7 +66,18 @@ public class ProfileService {
         user.setUnit(Unit.valueOf(req.unit()));
         user.setStartDay(req.startDay());
         userRepository.save(user);
-        return new StatsDtos.ProfileDto(user.getName(), user.getUnit().name(), user.getStartDay());
+        return toProfileDto(user);
+    }
+
+    private StatsDtos.ProfileDto toProfileDto(AppUser user) {
+        String activePlanName = user.getActivePlanId() == null
+                ? null
+                : planRepository.findByIdAndUserId(user.getActivePlanId(), user.getId())
+                .map(plan -> plan.getName())
+                .orElse(null);
+        return new StatsDtos.ProfileDto(
+                user.getName(), user.getUnit().name(), user.getStartDay(),
+                user.getActivePlanId(), activePlanName);
     }
 
     /** Exports the entire personal dataset as a JSON string. */

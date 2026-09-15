@@ -5,6 +5,7 @@ import { useProfile } from "../state";
 import { DAY_NAMES } from "../lib/format";
 import { useToast } from "../components/Toast";
 import { Button, Card, Modal, Skeleton } from "../components/ui";
+import { PlanManagement, PlanSwitcher, WeeklySchedule } from "../components/PlanTools";
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -68,6 +69,10 @@ export function ProfilePage() {
           <h1>Profile</h1>
         </div>
       </header>
+
+      <PlanSwitcher onChanged={loadStructure} />
+      <PlanManagement onChanged={loadStructure} />
+      <WeeklySchedule onChanged={loadStructure} />
 
       <Card className="section-card">
         <h2 className="section-title">You</h2>

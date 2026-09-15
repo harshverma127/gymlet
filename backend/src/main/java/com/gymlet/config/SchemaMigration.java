@@ -2,6 +2,7 @@ package com.gymlet.config;
 
 import com.gymlet.domain.AppUser;
 import com.gymlet.domain.BodyWeightLog;
+import com.gymlet.domain.WorkoutPlan;
 import com.gymlet.domain.Exercise;
 import com.gymlet.domain.ExerciseNote;
 import com.gymlet.domain.SetLog;
@@ -12,8 +13,10 @@ import com.gymlet.repository.BodyWeightLogRepository;
 import com.gymlet.repository.ExerciseNoteRepository;
 import com.gymlet.repository.SetLogRepository;
 import com.gymlet.repository.WorkoutDayRepository;
+import com.gymlet.repository.WorkoutPlanRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
 import com.gymlet.service.AuthService;
+import com.gymlet.service.PlanScheduleSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -61,7 +64,9 @@ public class SchemaMigration implements CommandLineRunner {
     private final SetLogRepository setLogRepository;
     private final ExerciseNoteRepository exerciseNoteRepository;
     private final BodyWeightLogRepository bodyWeightRepository;
+    private final WorkoutPlanRepository planRepository;
     private final AuthService authService;
+    private final PlanScheduleSupport planScheduleSupport;
 
     public SchemaMigration(DataSource dataSource,
                            AppUserRepository userRepository,
@@ -70,7 +75,9 @@ public class SchemaMigration implements CommandLineRunner {
                            SetLogRepository setLogRepository,
                            ExerciseNoteRepository exerciseNoteRepository,
                            BodyWeightLogRepository bodyWeightRepository,
-                           AuthService authService) {
+                           WorkoutPlanRepository planRepository,
+                           AuthService authService,
+                           PlanScheduleSupport planScheduleSupport) {
         this.dataSource = dataSource;
         this.userRepository = userRepository;
         this.workoutDayRepository = workoutDayRepository;
@@ -78,14 +85,134 @@ public class SchemaMigration implements CommandLineRunner {
         this.setLogRepository = setLogRepository;
         this.exerciseNoteRepository = exerciseNoteRepository;
         this.bodyWeightRepository = bodyWeightRepository;
+        this.planRepository = planRepository;
         this.authService = authService;
+        this.planScheduleSupport = planScheduleSupport;
     }
 
     @Override
     @Transactional
     public void run(String... args) {
         ensureDayNumberConstraint();
+        ensurePlanUniqueConstraint();
         migrateLegacyData();
+        backfillPlans();
+        backfillSevenDaySchedules();
+    }
+
+    // ---------------------------------------------------------------- plans
+
+    /**
+     * Plans extend day uniqueness to (user_id, plan_id, day_number): two plans
+     * may each have a "Day 1". Any leftover 2-column unique constraint on
+     * (user_id, day_number) is dropped and the 3-column one ensured. Purely
+     * additive: every existing row trivially satisfies the wider constraint.
+     */
+    private void ensurePlanUniqueConstraint() {
+        try (Connection c = dataSource.getConnection()) {
+            String product = c.getMetaData().getDatabaseProductName().toLowerCase();
+            if (!product.contains("postgres")) {
+                // H2/MySQL dev databases are recreated freely; the composite
+                // (user_id, day_number) constraint they may carry is harmless
+                // for single-plan dev usage. PostgreSQL (production) gets the
+                // full treatment.
+                return;
+            }
+            List<String> toDrop = new ArrayList<>();
+            boolean threeColExists = false;
+            try (Statement st = c.createStatement();
+                 ResultSet rs = st.executeQuery("""
+                         SELECT con.conname AS name,
+                                string_agg(att.attname, ',' ORDER BY k.ord) AS cols
+                         FROM pg_constraint con
+                         JOIN pg_class rel ON rel.oid = con.conrelid
+                         CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+                         JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = k.attnum
+                         WHERE rel.relname = 'workout_day'
+                           AND con.contype = 'u'
+                         GROUP BY con.conname
+                         """)) {
+                while (rs.next()) {
+                    String cols = rs.getString("cols").toLowerCase();
+                    if (cols.contains("plan_id") && cols.contains("user_id") && cols.contains("day_number")) {
+                        threeColExists = true;
+                    } else if (cols.equals("user_id,day_number") || cols.equals("day_number,user_id")) {
+                        toDrop.add(rs.getString("name"));
+                    }
+                }
+            }
+            for (String name : toDrop) {
+                try (Statement st = c.createStatement()) {
+                    st.executeUpdate("ALTER TABLE workout_day DROP CONSTRAINT \"" + name + "\"");
+                    log.info("Dropped legacy unique constraint '{}' on workout_day (user_id, day_number)", name);
+                }
+            }
+            if (!threeColExists) {
+                try (Statement st = c.createStatement()) {
+                    st.executeUpdate("ALTER TABLE workout_day ADD CONSTRAINT uk_workout_day_user_plan_day "
+                            + "UNIQUE (user_id, plan_id, day_number)");
+                    log.info("Created unique constraint uk_workout_day_user_plan_day (user_id, plan_id, day_number)");
+                }
+            }
+        } catch (Exception e) {
+            log.error("Could not fix workout_day plan uniqueness: {}", e.getMessage(), e);
+            throw new IllegalStateException("workout_day plan uniqueness fix failed", e);
+        }
+    }
+
+    /**
+     * Backfills the plan system for users that predate it. For every user:
+     *  - creates one plan named "My Split" (unless the name is taken),
+     *  - attaches their plan-less workout_day rows to it by existing ID,
+     *  - sets active_plan_id if unset.
+     * Idempotent: skips users whose days already carry a plan. Never touches
+     * sessions, sets, exercises or dates.
+     */
+    private void backfillPlans() {
+        for (AppUser user : userRepository.findAll()) {
+            List<WorkoutDay> orphanDays = workoutDayRepository.findByUserIdAndPlanIdIsNull()
+                    .stream().filter(d -> user.getId().equals(d.getUserId())).toList();
+            if (orphanDays.isEmpty()) {
+                continue;
+            }
+            WorkoutPlan plan = planRepository.findByUserIdAndNameIgnoreCase(user.getId(), "My Split")
+                    .orElseGet(() -> {
+                        WorkoutPlan p = new WorkoutPlan();
+                        p.setUserId(user.getId());
+                        p.setName("My Split");
+                        return planRepository.save(p);
+                    });
+            for (WorkoutDay day : orphanDays) {
+                day.setPlanId(plan.getId());
+                workoutDayRepository.save(day);
+            }
+            if (user.getActivePlanId() == null) {
+                user.setActivePlanId(plan.getId());
+                userRepository.save(user);
+            }
+            log.info("Backfilled plan '{}' with {} workout days for user '{}' (existing IDs preserved)",
+                    plan.getName(), orphanDays.size(), user.getUsername());
+        }
+    }
+
+    /**
+     * Ensures every user with an active plan has a 7-day weekday schedule derived from
+     * their legacy 5-slot split + startDay. Inserts rest-only rows only where needed.
+     * Never modifies sessions, sets, or existing training day IDs.
+     */
+    private void backfillSevenDaySchedules() {
+        for (AppUser user : userRepository.findAll()) {
+            if (user.getActivePlanId() == null) {
+                List<WorkoutPlan> plans = planRepository.findAllByUserIdOrderByCreatedAtDesc(user.getId());
+                if (!plans.isEmpty()) {
+                    user.setActivePlanId(plans.get(0).getId());
+                    userRepository.save(user);
+                } else {
+                    continue;
+                }
+            }
+            planScheduleSupport.ensureSevenDaySchedule(user, user.getActivePlanId());
+        }
     }
 
     // ------------------------------------------------------------ constraint

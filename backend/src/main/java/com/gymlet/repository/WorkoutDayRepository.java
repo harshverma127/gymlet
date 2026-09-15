@@ -14,6 +14,20 @@ public interface WorkoutDayRepository extends JpaRepository<WorkoutDay, Long> {
 
     Optional<WorkoutDay> findByUserIdAndDayNumber(Long userId, Integer dayNumber);
 
+    /** Days of one plan, in schedule order. */
+    List<WorkoutDay> findAllByUserIdAndPlanIdOrderByDayNumberAsc(Long userId, Long planId);
+
+    Optional<WorkoutDay> findByUserIdAndPlanIdAndDayNumber(Long userId, Long planId, Integer dayNumber);
+
+    Optional<WorkoutDay> findByUserIdAndPlanIdAndWeekday(Long userId, Long planId, Integer weekday);
+
+    List<WorkoutDay> findAllByUserIdAndPlanIdAndRestDayFalseOrderByWeekdayAscDayNumberAsc(Long userId, Long planId);
+
+    /** Days not yet attached to any plan — pre-migration rows waiting for backfill. */
+    List<WorkoutDay> findByUserIdIsNull();
+
+    List<WorkoutDay> findByUserIdAndPlanIdIsNull();
+
     /** The shared default template (used to bootstrap new accounts). */
     List<WorkoutDay> findByUserIdIsNullOrderByDayNumberAsc();
 

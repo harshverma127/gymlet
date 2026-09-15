@@ -1,0 +1,56 @@
+# Production profile for Render.com + Supabase PostgreSQL.
+#
+# Activate by setting SPRING_PROFILES_ACTIVE=prod in the Render environment.
+#
+# Required environment variables (Render -> your service -> Environment):
+#   DB_URL        jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+#   DB_USER       postgres.<project-ref>
+#   DB_PASSWORD   the database password (Render -> treat as secret)
+#
+# Render also injects PORT (default 10000); the app binds to it automatically.
+#
+# Why this profile exists: the default profile hardcodes the H2 driver. When
+# only spring.datasource.url is overridden via env vars, the hardcoded H2
+# driver still wins and Hibernate fails with
+# "Unable to determine Dialect without JDBC metadata". This profile supplies
+# every datasource property together, with no forced driver, so the PostgreSQL
+# driver is autodetected from the jdbc:postgresql:// URL.
+
+spring:
+  datasource:
+    # DB_URL is expected; DATABASE_URL works as a fallback for hosts that only
+    # provide the combined variable.
+    url: ${DB_URL:${DATABASE_URL:}}
+    username: ${DB_USER:${DATABASE_USERNAME:}}
+    password: ${DB_PASSWORD:${DATABASE_PASSWORD:}}
+    # No driver-class-name on purpose: the PostgreSQL JDBC driver registers
+    # itself and is selected automatically for jdbc:postgresql:// URLs.
+    hikari:
+      # Supabase free tier allows only a small number of concurrent
+      # connections; keep the pool tight.
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+      max-lifetime: 1500000
+
+  jpa:
+    hibernate:
+      # Same setting as development. Hibernate's incremental DDL only ever
+      # ADDs missing tables/columns; it never drops existing data, and the
+      # SchemaMigration runner handles everything ddl-auto cannot.
+      ddl-auto: update
+    open-in-view: false
+
+  h2:
+    console:
+      # No embedded H2 in production.
+      enabled: false
+
+server:
+  # Render injects PORT; fall back to 10000 (Render's default) locally.
+  port: ${PORT:10000}
+
+logging:
+  level:
+    root: info
+    com.gymlet: info

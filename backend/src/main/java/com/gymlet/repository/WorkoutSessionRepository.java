@@ -11,6 +11,10 @@ public interface WorkoutSessionRepository extends JpaRepository<WorkoutSession, 
 
     Optional<WorkoutSession> findFirstByUserIdAndDate(Long userId, LocalDate date);
 
+    List<WorkoutSession> findAllByUserIdAndDateOrderByStartedAtDesc(Long userId, LocalDate date);
+
+    Optional<WorkoutSession> findFirstByUserIdAndDateAndCompletedFalseOrderByStartedAtDesc(Long userId, LocalDate date);
+
     Optional<WorkoutSession> findFirstByUserIdAndDateAndCompletedTrue(Long userId, LocalDate date);
 
     List<WorkoutSession> findAllByUserIdOrderByDateDescIdDesc(Long userId);

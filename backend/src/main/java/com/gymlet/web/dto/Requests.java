@@ -36,4 +36,17 @@ public final class Requests {
     public record BodyWeightRequest(@NotNull String date,
                                     @NotNull Double weightKg) {
     }
+
+    public record CreatePlanRequest(@NotBlank @Size(max = 80) String name,
+                                    @Size(max = 2000) String description,
+                                    @Size(max = 200) String goal) {
+    }
+
+    public record UpdatePlanRequest(@Size(max = 80) String name,
+                                    @Size(max = 2000) String description,
+                                    @Size(max = 200) String goal) {
+    }
+
+    public record ScheduleWorkoutRequest(@NotNull Long workoutDayId) {
+    }
 }

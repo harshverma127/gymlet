@@ -1,5 +1,19 @@
 package com.gymlet.service;
 
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.gymlet.domain.AppUser;
 import com.gymlet.domain.Exercise;
 import com.gymlet.domain.ExerciseNote;
@@ -14,19 +28,6 @@ import com.gymlet.repository.WorkoutDayRepository;
 import com.gymlet.repository.WorkoutExerciseRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
 import com.gymlet.web.dto.WorkoutDtos;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Duration;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.stream.Collectors;
 
 @Service
 public class SessionService {
@@ -40,6 +41,8 @@ public class SessionService {
     private final WorkoutExerciseRepository workoutExerciseRepository;
     private final ExerciseRepository exerciseRepository;
     private final UserContext userContext;
+    private final PlanService planService;
+    private final PlanScheduleSupport scheduleSupport;
 
     public SessionService(WorkoutSessionRepository sessionRepository,
                           SetLogRepository setLogRepository,
@@ -47,7 +50,9 @@ public class SessionService {
                           WorkoutDayRepository workoutDayRepository,
                           WorkoutExerciseRepository workoutExerciseRepository,
                           ExerciseRepository exerciseRepository,
-                          UserContext userContext) {
+                          UserContext userContext,
+                          PlanService planService,
+                          PlanScheduleSupport scheduleSupport) {
         this.sessionRepository = sessionRepository;
         this.setLogRepository = setLogRepository;
         this.exerciseNoteRepository = exerciseNoteRepository;
@@ -55,6 +60,8 @@ public class SessionService {
         this.workoutExerciseRepository = workoutExerciseRepository;
         this.exerciseRepository = exerciseRepository;
         this.userContext = userContext;
+        this.planService = planService;
+        this.scheduleSupport = scheduleSupport;
     }
 
     // -------------------------------------------------------------- start
@@ -64,13 +71,10 @@ public class SessionService {
     public WorkoutDtos.SessionDto startToday() {
         AppUser user = userContext.getUser();
         LocalDate today = LocalDate.now();
-        int idx = (today.getDayOfWeek().getValue() - user.getStartDay() + 7) % 7;
-        if (idx >= 5) {
-            throw new IllegalArgumentException("It's a rest day — enjoy the break!");
-        }
-
-        WorkoutDay day = workoutDayRepository.findByUserIdAndDayNumber(user.getId(), idx + 1)
-                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        Long planId = planService.requireActivePlanId(user);
+        WorkoutDay day = scheduleSupport.scheduledWorkout(
+                        user.getId(), planId, today.getDayOfWeek().getValue(), user.getStartDay())
+                .orElseThrow(() -> new IllegalArgumentException("It's a rest day — enjoy the break!"));
 
         WorkoutSession session = new WorkoutSession();
         session.setUserId(user.getId());
@@ -117,15 +121,17 @@ public class SessionService {
     private static final int CUSTOM_DAY_NUMBER = 6;
     private static final String CUSTOM_DAY_NAME = "Custom Workout";
 
-    /** Gets or creates the single "Custom Workout" day for this user (dayNumber=6). */
+    /** Gets or creates the single "Custom Workout" day for this user's active plan. */
     private WorkoutDay getOrCreateCustomDay() {
-        Long userId = userContext.getUserId();
-        return workoutDayRepository.findByUserIdAndDayNumber(userId, CUSTOM_DAY_NUMBER)
+        AppUser user = userContext.getUser();
+        Long planId = planService.requireActivePlanId(user);
+        return workoutDayRepository.findByUserIdAndPlanIdAndDayNumber(user.getId(), planId, CUSTOM_DAY_NUMBER)
                 .orElseGet(() -> {
                     WorkoutDay custom = new WorkoutDay();
-                    custom.setUserId(userId);
+                    custom.setUserId(user.getId());
                     custom.setName(CUSTOM_DAY_NAME);
                     custom.setDayNumber(CUSTOM_DAY_NUMBER);
+                    custom.setPlanId(planId);
                     return workoutDayRepository.save(custom);
                 });
     }
@@ -196,8 +202,12 @@ public class SessionService {
     public WorkoutDtos.SessionDto startSessionForDay(Long workoutDayId) {
         AppUser user = userContext.getUser();
         LocalDate today = LocalDate.now();
+        Long planId = planService.requireActivePlanId(user);
         WorkoutDay day = workoutDayRepository.findByIdAndUserId(workoutDayId, user.getId())
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        if (day.getPlanId() != null && !day.getPlanId().equals(planId)) {
+            throw new NoSuchElementException("Workout day not found");
+        }
 
         WorkoutSession session = new WorkoutSession();
         session.setUserId(user.getId());

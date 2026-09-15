@@ -38,6 +38,14 @@ public class AppUser {
     @Column(nullable = false)
     private Integer startDay = 1;
 
+    /** The currently active plan (workout_plan.id). Null only before the boot migration backfills it. */
+    @Column(name = "active_plan_id")
+    private Long activePlanId;
+
+    /** Personal training preferences as JSON (goal, frequency, equipment, favorites…). Null = defaults. */
+    @Column(name = "training_profile", columnDefinition = "text")
+    private String trainingProfile;
+
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -87,5 +95,21 @@ public class AppUser {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public Long getActivePlanId() {
+        return activePlanId;
+    }
+
+    public void setActivePlanId(Long activePlanId) {
+        this.activePlanId = activePlanId;
+    }
+
+    public String getTrainingProfile() {
+        return trainingProfile;
+    }
+
+    public void setTrainingProfile(String trainingProfile) {
+        this.trainingProfile = trainingProfile;
     }
 }

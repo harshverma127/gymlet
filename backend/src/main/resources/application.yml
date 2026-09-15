@@ -1,9 +1,12 @@
 # Gymlet backend configuration
 #
-# Default profile: embedded H2 (in-memory) — zero setup, data is wiped on restart.
-# For persistent MySQL:  docker compose up -d   then run with the "mysql" profile:
-#   ./mvnw spring-boot:run -Dspring-boot.run.profiles=mysql
-# (connection details can be overridden with DB_URL / DB_USER / DB_PASSWORD env vars)
+# Profiles:
+#   (default)  embedded H2, in-memory — zero setup, data is wiped on restart.
+#   mysql      PostgreSQL (yes, despite the legacy name): local Postgres/Supabase
+#              via docker compose, DB_URL / DB_USER / DB_PASSWORD env vars.
+#   prod       Render.com + Supabase PostgreSQL. Activate with
+#              SPRING_PROFILES_ACTIVE=prod; see application-prod.yml for the
+#              required environment variables.
 
 spring:
   application:

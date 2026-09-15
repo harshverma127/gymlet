@@ -7,6 +7,7 @@ import { toDisplay, toKg, formatVolume } from "../lib/units";
 import { formatDateLong, plural } from "../lib/format";
 import { useToast } from "../components/Toast";
 import { Button, Card, PixelCheckbox, SegmentedProgress, Skeleton } from "../components/ui";
+import { PlanSwitcher } from "../components/PlanTools";
 import {
   NoteIcon,
   PauseIcon,
@@ -117,7 +118,7 @@ export function TodayPage() {
   if (!today) return null;
 
   if (today.isRestDay && !session) {
-    return <RestDayView today={today} unit={unit} starting={starting} onStartCustom={startCustom} />;
+    return <RestDayView today={today} unit={unit} starting={starting} onStartCustom={startCustom} onChanged={load} />;
   }
 
   if (session) {
@@ -139,14 +140,15 @@ export function TodayPage() {
     );
   }
 
-  return <ReadyView today={today} unit={unit} starting={starting} onStart={start} onStartForDay={startForDay} onStartCustom={startCustom} />;
+  return <ReadyView today={today} unit={unit} starting={starting} onStart={start} onStartForDay={startForDay} onStartCustom={startCustom} onChanged={load} />;
 }
 
 /* ------------------------------ rest day ------------------------------ */
 
-function RestDayView({ today, unit, starting, onStartCustom }: { today: Today; unit: "KG" | "LB"; starting: boolean; onStartCustom: () => void }) {
+function RestDayView({ today, unit, starting, onStartCustom, onChanged }: { today: Today; unit: "KG" | "LB"; starting: boolean; onStartCustom: () => void; onChanged: () => Promise<void> }) {
   return (
     <div className="page">
+      <PlanSwitcher onChanged={onChanged} />
       <Card className="rest-card">
         <div className="rest-art" aria-hidden="true">
           <span className="rest-block b1" />
@@ -185,6 +187,7 @@ function ReadyView({
   onStart,
   onStartForDay,
   onStartCustom,
+  onChanged,
 }: {
   today: Today;
   unit: "KG" | "LB";
@@ -192,11 +195,13 @@ function ReadyView({
   onStart: () => void;
   onStartForDay: (dayId: number) => void;
   onStartCustom: () => void;
+  onChanged: () => Promise<void>;
 }) {
   const [selectedDay, setSelectedDay] = useState<number>(today.workoutDayId);
 
   return (
     <div className="page">
+      <PlanSwitcher onChanged={onChanged} />
       <header className="page-head">
         <div>
           <p className="eyebrow">Day {today.dayNumber} · {weekdayToday()}</p>

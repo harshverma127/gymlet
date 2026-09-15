@@ -44,6 +44,7 @@ public final class StatsDtos {
                                        List<BodyWeightDto> history) {
     }
 
-    public record ProfileDto(String name, String unit, Integer startDay) {
+    public record ProfileDto(String name, String unit, Integer startDay,
+                             Long activePlanId, String activePlanName) {
     }
 }

@@ -2,16 +2,17 @@ package com.gymlet.service;
 
 import com.gymlet.domain.AppUser;
 import com.gymlet.domain.Exercise;
-import com.gymlet.domain.MuscleGroup;
 import com.gymlet.domain.SetLog;
 import com.gymlet.domain.WorkoutDay;
 import com.gymlet.domain.WorkoutExercise;
+import com.gymlet.domain.WorkoutPlan;
 import com.gymlet.domain.WorkoutSession;
 import com.gymlet.repository.ExerciseNoteRepository;
 import com.gymlet.repository.ExerciseRepository;
 import com.gymlet.repository.SetLogRepository;
 import com.gymlet.repository.WorkoutDayRepository;
 import com.gymlet.repository.WorkoutExerciseRepository;
+import com.gymlet.repository.WorkoutPlanRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
 import com.gymlet.web.dto.WorkoutDtos;
 import com.gymlet.web.dto.Requests;
@@ -22,6 +23,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 @Service
 public class StructureService {
@@ -32,7 +34,10 @@ public class StructureService {
     private final WorkoutSessionRepository sessionRepository;
     private final SetLogRepository setLogRepository;
     private final ExerciseNoteRepository exerciseNoteRepository;
+    private final WorkoutPlanRepository planRepository;
     private final UserContext userContext;
+    private final PlanService planService;
+    private final PlanScheduleSupport scheduleSupport;
 
     public StructureService(WorkoutDayRepository workoutDayRepository,
                             WorkoutExerciseRepository workoutExerciseRepository,
@@ -40,82 +45,117 @@ public class StructureService {
                             WorkoutSessionRepository sessionRepository,
                             SetLogRepository setLogRepository,
                             ExerciseNoteRepository exerciseNoteRepository,
-                            UserContext userContext) {
+                            WorkoutPlanRepository planRepository,
+                            UserContext userContext,
+                            PlanService planService,
+                            PlanScheduleSupport scheduleSupport) {
         this.workoutDayRepository = workoutDayRepository;
         this.workoutExerciseRepository = workoutExerciseRepository;
         this.exerciseRepository = exerciseRepository;
         this.sessionRepository = sessionRepository;
         this.setLogRepository = setLogRepository;
         this.exerciseNoteRepository = exerciseNoteRepository;
+        this.planRepository = planRepository;
         this.userContext = userContext;
+        this.planService = planService;
+        this.scheduleSupport = scheduleSupport;
     }
 
     // ---------------------------------------------------------------- structure
 
     @Transactional(readOnly = true)
     public List<WorkoutDtos.WorkoutDayDto> getWorkoutDays() {
-        return workoutDayRepository.findAllByUserIdOrderByDayNumberAsc(userContext.getUserId()).stream()
+        AppUser user = userContext.getUser();
+        Long planId = planService.requireActivePlanId(user);
+        return scheduleSupport.selectableTrainingDays(user.getId(), planId).stream()
                 .map(this::toWorkoutDayDto)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public WorkoutDtos.WorkoutDayDto getWorkoutDay(Long id) {
-        return toWorkoutDayDto(workoutDayRepository.findByIdAndUserId(id, userContext.getUserId())
-                .orElseThrow(() -> new NoSuchElementException("Workout day not found")));
+        WorkoutDay day = requireTrainingDay(id);
+        return toWorkoutDayDto(day);
     }
 
     @Transactional(readOnly = true)
     public WorkoutDtos.WorkoutDayDto getWorkoutDayByNumber(int dayNumber) {
-        return toWorkoutDayDto(workoutDayRepository.findByUserIdAndDayNumber(userContext.getUserId(), dayNumber)
+        AppUser user = userContext.getUser();
+        Long planId = planService.requireActivePlanId(user);
+        return toWorkoutDayDto(workoutDayRepository.findByUserIdAndPlanIdAndDayNumber(user.getId(), planId, dayNumber)
                 .orElseThrow(() -> new NoSuchElementException("Workout day not found")));
     }
 
     // ------------------------------------------------------------------- today
 
-    /**
-     * The core "what am I doing today" payload.
-     * Days 1..5 map onto the week starting from the user's chosen start day;
-     * the two remaining slots are rest days.
-     */
     @Transactional(readOnly = true)
     public WorkoutDtos.TodayDto getToday() {
         AppUser user = userContext.getUser();
+        Long planId = planService.requireActivePlanId(user);
+        WorkoutPlan plan = planRepository.findByIdAndUserId(planId, user.getId())
+                .orElseThrow(() -> new NoSuchElementException("Active plan not found"));
+
         LocalDate today = LocalDate.now();
-        int idx = (today.getDayOfWeek().getValue() - user.getStartDay() + 7) % 7; // 0..6
-        boolean restDay = idx >= 5;
+        int weekday = today.getDayOfWeek().getValue();
 
-        WorkoutSession existing = sessionRepository.findFirstByUserIdAndDate(user.getId(), today).orElse(null);
-        if (existing != null) {
-            WorkoutDay day = existing.getWorkoutDay();
-            return buildTodayDto(day, today, existing, null);
+        Optional<WorkoutDay> scheduled = scheduleSupport.scheduledWorkout(
+                user.getId(), planId, weekday, user.getStartDay());
+
+        List<WorkoutSession> sessionsToday = sessionRepository
+                .findAllByUserIdAndDateOrderByStartedAtDesc(user.getId(), today);
+
+        WorkoutSession activeIncomplete = sessionsToday.stream()
+                .filter(s -> !s.isCompleted())
+                .findFirst()
+                .orElse(null);
+
+        List<WorkoutDtos.TodaySessionSummaryDto> sessionSummaries = sessionsToday.stream()
+                .map(s -> new WorkoutDtos.TodaySessionSummaryDto(
+                        s.getId(),
+                        sessionDisplayName(s),
+                        s.isCompleted(),
+                        s.getStartedAt().toString()))
+                .toList();
+
+        WorkoutDay previewDay;
+        WorkoutSession anchorSession = activeIncomplete;
+        if (anchorSession != null) {
+            previewDay = anchorSession.getWorkoutDay();
+        } else if (scheduled.isPresent()) {
+            previewDay = scheduled.get();
+        } else {
+            previewDay = nextTrainingDayAfter(today, user, planId);
         }
 
-        if (restDay) {
-            WorkoutDay next = nextTrainingDayAfter(today, user.getStartDay());
-            return buildTodayDto(next, today, null, next);
-        }
+        boolean restDay = scheduled.isEmpty() && anchorSession == null;
 
-        WorkoutDay day = workoutDayRepository.findByUserIdAndDayNumber(user.getId(), idx + 1)
-                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
-        return buildTodayDto(day, today, null, null);
+        WorkoutDay nextDay = restDay ? nextTrainingDayAfter(today, user, planId) : null;
+
+        return buildTodayDto(
+                user, plan, previewDay, today, restDay, anchorSession, nextDay,
+                scheduled.orElse(null), sessionSummaries);
     }
 
-    private WorkoutDay nextTrainingDayAfter(LocalDate from, int startDay) {
+    private WorkoutDay nextTrainingDayAfter(LocalDate from, AppUser user, Long planId) {
         LocalDate d = from.plusDays(1);
-        while (true) {
-            int i = (d.getDayOfWeek().getValue() - startDay + 7) % 7;
-            if (i < 5) {
-                int dayNumber = i + 1;
-                return workoutDayRepository.findByUserIdAndDayNumber(userContext.getUserId(), dayNumber)
-                        .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        int startDay = user.getStartDay();
+        while (d.isBefore(from.plusDays(8))) {
+            int weekday = d.getDayOfWeek().getValue();
+            Optional<WorkoutDay> w = scheduleSupport.scheduledWorkout(user.getId(), planId, weekday, startDay);
+            if (w.isPresent()) {
+                return w.get();
             }
             d = d.plusDays(1);
         }
+        return scheduleSupport.selectableTrainingDays(user.getId(), planId).stream()
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException("No training days in this plan"));
     }
 
-    private WorkoutDtos.TodayDto buildTodayDto(WorkoutDay day, LocalDate today,
-                                               WorkoutSession existing, WorkoutDay nextDay) {
+    private WorkoutDtos.TodayDto buildTodayDto(AppUser user, WorkoutPlan plan, WorkoutDay day, LocalDate today,
+                                               boolean restDay, WorkoutSession activeSession, WorkoutDay nextDay,
+                                               WorkoutDay scheduledDay,
+                                               List<WorkoutDtos.TodaySessionSummaryDto> sessionsToday) {
         List<WorkoutExercise> wes = workoutExerciseRepository.findByWorkoutDayIdOrderBySetOrderAsc(day.getId());
         List<WorkoutDtos.TodayExerciseDto> exercises = new ArrayList<>();
         for (WorkoutExercise we : wes) {
@@ -131,27 +171,42 @@ public class StructureService {
                     ex.getId(), ex.getName(), ex.getMuscleGroup().name(), ex.getRepMin(), ex.getRepMax(),
                     ex.isCompound(), we.getSets(), lastSets, suggestion, lastNote));
         }
-        // Available workout days for the selector (all planned days)
-        List<WorkoutDtos.WorkoutDaySummaryDto> availableDays = workoutDayRepository
-                .findAllByUserIdOrderByDayNumberAsc(userContext.getUserId()).stream()
-                .filter(d -> d.getDayNumber() <= 5) // Only planned days, not custom (6)
+
+        Long planId = plan.getId();
+        List<WorkoutDtos.WorkoutDaySummaryDto> availableDays = scheduleSupport
+                .selectableTrainingDays(user.getId(), planId).stream()
                 .map(d -> new WorkoutDtos.WorkoutDaySummaryDto(d.getId(), d.getDayNumber(), d.getName()))
                 .toList();
+
         return new WorkoutDtos.TodayDto(
-                existing == null && (today.getDayOfWeek().getValue() - userContext.getUser().getStartDay() + 7) % 7 >= 5,
-                day.getDayNumber(), day.getId(), day.getName(), exercises,
-                existing != null ? existing.getId() : null,
-                existing != null && existing.isCompleted(),
+                restDay,
+                day.getDayNumber(),
+                day.getId(),
+                day.getName(),
+                exercises,
+                activeSession != null ? activeSession.getId() : null,
+                activeSession != null && activeSession.isCompleted(),
                 nextDay != null ? nextDay.getId() : null,
                 nextDay != null ? nextDay.getName() : null,
                 nextDay != null ? nextDay.getDayNumber() : null,
-                availableDays);
+                availableDays,
+                plan.getId(),
+                plan.getName(),
+                scheduledDay != null ? scheduledDay.getId() : null,
+                scheduledDay != null ? scheduledDay.getName() : null,
+                sessionsToday);
+    }
+
+    static String sessionDisplayName(WorkoutSession s) {
+        if (s.getWorkoutDayNameSnapshot() != null && !s.getWorkoutDayNameSnapshot().isBlank()) {
+            return s.getWorkoutDayNameSnapshot();
+        }
+        return s.getWorkoutDay().getName();
     }
 
     private record LastSessionData(List<SetLog> sets, String note) {
     }
 
-    /** Last completed session's sets (and optional note) for an exercise, across all history. */
     private LastSessionData lastSessionForExercise(Long exerciseId) {
         List<WorkoutSession> completed = sessionRepository.findByUserIdAndCompletedTrueOrderByDateDesc(userContext.getUserId());
         for (WorkoutSession s : completed) {
@@ -166,7 +221,6 @@ public class StructureService {
         return new LastSessionData(List.of(), null);
     }
 
-    /** Simple, understandable progression rule based on the previous session. */
     private WorkoutDtos.SuggestionDto computeSuggestion(Exercise ex, List<SetLog> lastSets) {
         List<SetLog> done = lastSets.stream()
                 .filter(s -> s.isCompleted() && s.getWeight() != null && s.getWeight() > 0
@@ -229,7 +283,7 @@ public class StructureService {
             throw new IllegalArgumentException("Rep max must be at least rep min");
         }
         ex.setName(req.name().trim());
-        ex.setMuscleGroup(MuscleGroup.valueOf(req.muscleGroup()));
+        ex.setMuscleGroup(com.gymlet.domain.MuscleGroup.valueOf(req.muscleGroup()));
         ex.setRepMin(req.repMin());
         ex.setRepMax(req.repMax());
         ex.setCompound(req.compound() != null && req.compound());
@@ -249,8 +303,7 @@ public class StructureService {
 
     @Transactional
     public WorkoutDtos.WorkoutDayDto addExerciseToDay(Long workoutDayId, Requests.AddExerciseToDayRequest req) {
-        WorkoutDay day = workoutDayRepository.findByIdAndUserId(workoutDayId, userContext.getUserId())
-                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        WorkoutDay day = requireTrainingDay(workoutDayId);
         Exercise ex = exerciseRepository.findByIdAndUserId(req.exerciseId(), userContext.getUserId())
                 .orElseThrow(() -> new NoSuchElementException("Exercise not found"));
         List<WorkoutExercise> existing = workoutExerciseRepository.findByWorkoutDayIdOrderBySetOrderAsc(workoutDayId);
@@ -304,24 +357,35 @@ public class StructureService {
         }
     }
 
-    // ------------------------------------------------------------ reschedule
-
-    /**
-     * Swaps the dayNumber of two workout days. This reorders the weekly schedule
-     * without affecting any historical workout sessions.
-     */
     @Transactional
     public void swapDayNumbers(Long dayId1, Long dayId2) {
-        WorkoutDay d1 = workoutDayRepository.findByIdAndUserId(dayId1, userContext.getUserId())
-                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
-        WorkoutDay d2 = workoutDayRepository.findByIdAndUserId(dayId2, userContext.getUserId())
-                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
-        if (d1.getDayNumber().equals(d2.getDayNumber())) return;
-        int tmp = d1.getDayNumber();
+        WorkoutDay d1 = requireTrainingDay(dayId1);
+        WorkoutDay d2 = requireTrainingDay(dayId2);
+        if (d1.getDayNumber().equals(d2.getDayNumber()) && d1.getWeekday().equals(d2.getWeekday())) {
+            return;
+        }
+        int tmpNum = d1.getDayNumber();
         d1.setDayNumber(d2.getDayNumber());
-        d2.setDayNumber(tmp);
+        d2.setDayNumber(tmpNum);
+        Integer tmpWd = d1.getWeekday();
+        d1.setWeekday(d2.getWeekday());
+        d2.setWeekday(tmpWd);
         workoutDayRepository.save(d1);
         workoutDayRepository.save(d2);
+    }
+
+    private WorkoutDay requireTrainingDay(Long id) {
+        AppUser user = userContext.getUser();
+        Long planId = planService.requireActivePlanId(user);
+        WorkoutDay day = workoutDayRepository.findByIdAndUserId(id, user.getId())
+                .orElseThrow(() -> new NoSuchElementException("Workout day not found"));
+        if (day.isRestDay()) {
+            throw new IllegalArgumentException("Rest days cannot be edited as workouts");
+        }
+        if (day.getPlanId() != null && !day.getPlanId().equals(planId)) {
+            throw new NoSuchElementException("Workout day not found");
+        }
+        return day;
     }
 
     // ---------------------------------------------------------------- mapping
@@ -331,7 +395,8 @@ public class StructureService {
                 .findByWorkoutDayIdOrderBySetOrderAsc(day.getId()).stream()
                 .map(this::toWorkoutExerciseDto)
                 .toList();
-        return new WorkoutDtos.WorkoutDayDto(day.getId(), day.getDayNumber(), day.getName(), exercises);
+        return new WorkoutDtos.WorkoutDayDto(day.getId(), day.getDayNumber(), day.getName(),
+                day.getWeekday(), day.isRestDay(), exercises);
     }
 
     public WorkoutDtos.WorkoutExerciseDto toWorkoutExerciseDto(WorkoutExercise we) {

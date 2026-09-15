@@ -28,6 +28,31 @@ export interface Profile {
   name: string;
   unit: Unit;
   startDay: number; // 1 = Monday .. 7 = Sunday
+  activePlanId: number | null;
+  activePlanName: string | null;
+}
+
+export interface PlanSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  goal: string | null;
+  archived: boolean;
+  active: boolean;
+  historicalSessionCount: number;
+}
+
+export interface PlanList {
+  plans: PlanSummary[];
+  active: PlanSummary;
+}
+
+export interface ScheduleDay {
+  id: number;
+  weekday: number | null;
+  dayNumber: number;
+  name: string;
+  restDay: boolean;
 }
 
 export interface Exercise {
@@ -55,6 +80,8 @@ export interface WorkoutDay {
   id: number;
   dayNumber: number;
   name: string;
+  weekday?: number | null;
+  restDay?: boolean;
   exercises: WorkoutExercise[];
 }
 
@@ -100,6 +127,10 @@ export interface Today {
   nextWorkoutDayName: string | null;
   nextDayNumber: number | null;
   availableDays: WorkoutDaySummary[];
+  activePlanId: number | null;
+  activePlanName: string | null;
+  scheduledWorkoutDayId: number | null;
+  scheduledWorkoutDayName: string | null;
 }
 
 export interface SetLog {

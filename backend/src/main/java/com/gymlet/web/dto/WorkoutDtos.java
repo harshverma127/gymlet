@@ -18,6 +18,7 @@ public final class WorkoutDtos {
     }
 
     public record WorkoutDayDto(Long id, Integer dayNumber, String name,
+                                Integer weekday, boolean restDay,
                                 List<WorkoutExerciseDto> exercises) {
     }
 
@@ -36,10 +37,17 @@ public final class WorkoutDtos {
                                    List<LastSetDto> lastSets, SuggestionDto suggestion, String lastNote) {
     }
 
+    public record TodaySessionSummaryDto(Long id, String workoutDayName, boolean completed,
+                                         String startedAt) {
+    }
+
     public record TodayDto(Boolean isRestDay, Integer dayNumber, Long workoutDayId, String workoutDayName,
                            List<TodayExerciseDto> exercises, Long activeSessionId, Boolean completed,
                            Long nextWorkoutDayId, String nextWorkoutDayName, Integer nextDayNumber,
-                           List<WorkoutDaySummaryDto> availableDays) {
+                           List<WorkoutDaySummaryDto> availableDays,
+                           Long activePlanId, String activePlanName,
+                           Long scheduledWorkoutDayId, String scheduledWorkoutDayName,
+                           List<TodaySessionSummaryDto> sessionsToday) {
     }
 
     /** Lightweight workout day info for the day selector. */
