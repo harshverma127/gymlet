@@ -37,6 +37,7 @@ public class CorsConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(
+                "https://gymlet-6qdu.vercel.app",
                 "https://gymlet-1.onrender.com",
                 "https://gymlet.onrender.com",
                 "http://localhost:5173"

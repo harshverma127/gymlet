@@ -174,10 +174,12 @@ function waitForBackend(): Promise<void> {
  * One fetch attempt that understands cold starts: on a network failure (or a
  * gateway response) it waits for the shared wake probe, then retries once.
  */
-async function fetchWithWakeRetry(url: string, init: RequestInit): Promise<Response> {
+async function fetchWithWakeRetry(path: string, init: RequestInit): Promise<Response> {
+  const url = `${API_BASE_URL}${path}`;
+  const isWakeProbeRequest = path === WAKE_PROBE;
   try {
     const res = await fetchWithTimeout(url, init, REQUEST_TIMEOUT_MS);
-    if (isGatewayUnavailable(res.status)) {
+    if (isGatewayUnavailable(res.status) && !isWakeProbeRequest) {
       // Backend is booting — join the wake probe and try once more.
       await waitForBackend();
       return await fetchWithTimeout(url, init, REQUEST_TIMEOUT_MS);
@@ -185,6 +187,7 @@ async function fetchWithWakeRetry(url: string, init: RequestInit): Promise<Respo
     return res;
   } catch (err) {
     if (!isNetworkFailure(err)) throw err;
+    if (isWakeProbeRequest) throw err;
     await waitForBackend();
     // If the backend is still down this throws again and request() surfaces the fallback.
     return await fetchWithTimeout(url, init, REQUEST_TIMEOUT_MS);
@@ -199,7 +202,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   let res: Response;
   try {
-    res = await fetchWithWakeRetry(`${API_BASE_URL}${path}`, {
+    res = await fetchWithWakeRetry(path, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
