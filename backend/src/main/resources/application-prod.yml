@@ -23,6 +23,7 @@ spring:
     url: ${DB_URL:${DATABASE_URL:}}
     username: ${DB_USER:${DATABASE_USERNAME:}}
     password: ${DB_PASSWORD:${DATABASE_PASSWORD:}}
+    driver-class-name: org.postgresql.Driver
     # No driver-class-name on purpose: the PostgreSQL JDBC driver registers
     # itself and is selected automatically for jdbc:postgresql:// URLs.
     hikari:
