@@ -170,8 +170,7 @@ public class SchemaMigration implements CommandLineRunner {
      */
     private void backfillPlans() {
         for (AppUser user : userRepository.findAll()) {
-            List<WorkoutDay> orphanDays = workoutDayRepository.findByUserIdAndPlanIdIsNull()
-                    .stream().filter(d -> user.getId().equals(d.getUserId())).toList();
+            List<WorkoutDay> orphanDays = workoutDayRepository.findByUserIdAndPlanIdIsNull(user.getId());
             if (orphanDays.isEmpty()) {
                 continue;
             }

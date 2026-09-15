@@ -26,7 +26,7 @@ public interface WorkoutDayRepository extends JpaRepository<WorkoutDay, Long> {
     /** Days not yet attached to any plan — pre-migration rows waiting for backfill. */
     List<WorkoutDay> findByUserIdIsNull();
 
-    List<WorkoutDay> findByUserIdAndPlanIdIsNull();
+    List<WorkoutDay> findByUserIdAndPlanIdIsNull(Long userId);
 
     /** The shared default template (used to bootstrap new accounts). */
     List<WorkoutDay> findByUserIdIsNullOrderByDayNumberAsc();
