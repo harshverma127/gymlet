@@ -19,4 +19,17 @@ class CorsConfigTest {
         assertThat(config).isNotNull();
         assertThat(config.getAllowedOrigins()).contains("https://gymlet-6qdu.vercel.app");
     }
+
+    @Test
+    void allowsPreflightFromCurrentVercelFrontendOrigin() {
+        CorsConfigurationSource source = new CorsConfig().corsConfigurationSource();
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/health");
+        request.addHeader("Origin", "https://gymlet-6qdu.vercel.app");
+        request.addHeader("Access-Control-Request-Method", "GET");
+        CorsConfiguration config = source.getCorsConfiguration(request);
+
+        assertThat(config).isNotNull();
+        assertThat(config.getAllowedMethods()).contains("OPTIONS", "GET");
+        assertThat(config.getAllowedOrigins()).contains("https://gymlet-6qdu.vercel.app");
+    }
 }

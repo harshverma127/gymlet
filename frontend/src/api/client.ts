@@ -118,7 +118,7 @@ const PROBE_TIMEOUT_MS = 8_000;
 const WAKE_DELAYS = [2_000, 3_000, 5_000];
 const WAKE_LIMIT_MS = 90_000;
 // A public, lightweight endpoint used to probe whether the backend is up.
-const WAKE_PROBE = "/api/auth/status";
+const WAKE_PROBE = "/api/health";
 
 let wakePromise: Promise<void> | null = null;
 
@@ -155,13 +155,14 @@ function waitForBackend(): Promise<void> {
       let awake = false;
       while (!awake) {
         try {
-          await fetchWithTimeout(`${API_BASE_URL}${WAKE_PROBE}`, { cache: "no-store" }, PROBE_TIMEOUT_MS);
-          awake = true;
+          const res = await fetchWithTimeout(`${API_BASE_URL}${WAKE_PROBE}`, { cache: "no-store" }, PROBE_TIMEOUT_MS);
+          awake = res.ok;
         } catch {
-          if (Date.now() - start >= WAKE_LIMIT_MS) break;
-          await sleep(WAKE_DELAYS[Math.min(attempt, WAKE_DELAYS.length - 1)]);
-          attempt++;
+          awake = false;
         }
+        if (awake || Date.now() - start >= WAKE_LIMIT_MS) break;
+        await sleep(WAKE_DELAYS[Math.min(attempt, WAKE_DELAYS.length - 1)]);
+        attempt++;
       }
       setConnectionStatus(awake ? "ok" : "unreachable");
       wakePromise = null;
@@ -179,7 +180,7 @@ async function fetchWithWakeRetry(path: string, init: RequestInit): Promise<Resp
   const isWakeProbeRequest = path === WAKE_PROBE;
   try {
     const res = await fetchWithTimeout(url, init, REQUEST_TIMEOUT_MS);
-    if (isGatewayUnavailable(res.status) && !isWakeProbeRequest) {
+    if ((isGatewayUnavailable(res.status) || res.status === 429) && !isWakeProbeRequest) {
       // Backend is booting — join the wake probe and try once more.
       await waitForBackend();
       return await fetchWithTimeout(url, init, REQUEST_TIMEOUT_MS);

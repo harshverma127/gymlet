@@ -37,6 +37,7 @@ public class AuthFilter extends OncePerRequestFilter {
                 || path.equals("/api/auth/register")
                 || path.equals("/api/auth/claim")
                 || path.equals("/api/auth/status")
+                || path.equals("/api/health")
                 || path.equals("/h2-console")
                 || path.startsWith("/h2-console/");
     }
