@@ -76,4 +76,12 @@ public class PlanController {
                                               @PathVariable int weekday) {
         return planService.setRestDay(id, weekday);
     }
+
+    /** Rest → Workout day: create (or rename) the training day scheduled on a weekday. */
+    @PutMapping("/{id}/schedule/{weekday}/workout")
+    public PlanDtos.ScheduleDayDto createWorkoutDay(@PathVariable Long id,
+                                                    @PathVariable int weekday,
+                                                    @Valid @RequestBody Requests.CreateScheduleWorkoutRequest req) {
+        return planService.createWorkoutDay(id, weekday, req.name());
+    }
 }

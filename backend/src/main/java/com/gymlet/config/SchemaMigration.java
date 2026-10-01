@@ -2,7 +2,6 @@ package com.gymlet.config;
 
 import com.gymlet.domain.AppUser;
 import com.gymlet.domain.BodyWeightLog;
-import com.gymlet.domain.WorkoutPlan;
 import com.gymlet.domain.Exercise;
 import com.gymlet.domain.ExerciseNote;
 import com.gymlet.domain.SetLog;
@@ -13,10 +12,10 @@ import com.gymlet.repository.BodyWeightLogRepository;
 import com.gymlet.repository.ExerciseNoteRepository;
 import com.gymlet.repository.SetLogRepository;
 import com.gymlet.repository.WorkoutDayRepository;
-import com.gymlet.repository.WorkoutPlanRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
 import com.gymlet.service.AuthService;
-import com.gymlet.service.PlanScheduleSupport;
+import com.gymlet.service.PlanService;
+import com.gymlet.service.ScheduleReconciler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -35,21 +34,24 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * One-time, idempotent migration of the pre-multi-user database:
+ * One-time, idempotent migration of the pre-multi-user / pre-plan database.
  *
- *  1. workout_day.day_number used to be globally unique; per-user plans collide,
- *     so the old unique constraint/index on that column alone is dropped and a
- *     composite UNIQUE (user_id, day_number) is ensured instead. This is done
- *     with DDL (never relying on Hibernate's ddl-auto), and it must work on
- *     PostgreSQL where the legacy constraint is backed by an index that cannot
- *     simply be DROPped ("...constraint ... requires it").
- *  2. The legacy single-user world (an AppUser with no PIN yet, plus any
- *     workouts/history/bodyweight owned by nobody) is claimed: the legacy user
- *     gets a username, gets an independent copy of the default split, and all
- *     existing history is re-pointed to that copy.
+ * <p>Responsibilities:
+ * <ol>
+ *   <li>Make {@code workout_day} uniqueness coherent with the plan system: the
+ *       single correct key is {@code (user_id, plan_id, day_number)}. Any legacy
+ *       unique constraint/index on {@code (user_id, day_number)} or on
+ *       {@code day_number} alone is dropped, because it silently prevents two
+ *       plans from each having a "Day 1" (and crashes plan creation/copy).</li>
+ *   <li>Claim the legacy single-user world (an AppUser with no PIN, plus any
+ *       workouts/history/bodyweight owned by nobody).</li>
+ *   <li>Reconcile every user's plan + 7-day schedule via PlanService, which is
+ *       the single source of truth in the application.</li>
+ * </ol>
  *
- * Existing data is never deleted. Both steps are safe to re-run: they detect
- * work already done and skip it.
+ * Existing data is never deleted, and every step is safe to re-run against an
+ * existing PostgreSQL database. DDL is executed directly (not left to
+ * Hibernate {@code ddl-auto}) so ordering is deterministic.
  */
 @Component
 @Order(2)
@@ -64,9 +66,9 @@ public class SchemaMigration implements CommandLineRunner {
     private final SetLogRepository setLogRepository;
     private final ExerciseNoteRepository exerciseNoteRepository;
     private final BodyWeightLogRepository bodyWeightRepository;
-    private final WorkoutPlanRepository planRepository;
     private final AuthService authService;
-    private final PlanScheduleSupport planScheduleSupport;
+    private final PlanService planService;
+    private final ScheduleReconciler scheduleReconciler;
 
     public SchemaMigration(DataSource dataSource,
                            AppUserRepository userRepository,
@@ -75,9 +77,9 @@ public class SchemaMigration implements CommandLineRunner {
                            SetLogRepository setLogRepository,
                            ExerciseNoteRepository exerciseNoteRepository,
                            BodyWeightLogRepository bodyWeightRepository,
-                           WorkoutPlanRepository planRepository,
                            AuthService authService,
-                           PlanScheduleSupport planScheduleSupport) {
+                           PlanService planService,
+                           ScheduleReconciler scheduleReconciler) {
         this.dataSource = dataSource;
         this.userRepository = userRepository;
         this.workoutDayRepository = workoutDayRepository;
@@ -85,169 +87,55 @@ public class SchemaMigration implements CommandLineRunner {
         this.setLogRepository = setLogRepository;
         this.exerciseNoteRepository = exerciseNoteRepository;
         this.bodyWeightRepository = bodyWeightRepository;
-        this.planRepository = planRepository;
         this.authService = authService;
-        this.planScheduleSupport = planScheduleSupport;
+        this.planService = planService;
+        this.scheduleReconciler = scheduleReconciler;
     }
 
     @Override
     @Transactional
     public void run(String... args) {
-        ensureDayNumberConstraint();
-        ensurePlanUniqueConstraint();
+        ensureWorkoutDayUniqueness();
         migrateLegacyData();
-        backfillPlans();
-        backfillSevenDaySchedules();
+        // Repair already-planned malformed schedules before ensurePlanForUser
+        // touches them, then reconcile again afterwards so anything the legacy
+        // backfill produced is normalised too. Both passes are idempotent.
+        scheduleReconciler.reconcileAll();
+        reconcilePlans();
+        scheduleReconciler.reconcileAll();
     }
 
-    // ---------------------------------------------------------------- plans
+    // ----------------------------------------------------------- uniqueness
 
     /**
-     * Plans extend day uniqueness to (user_id, plan_id, day_number): two plans
-     * may each have a "Day 1". Any leftover 2-column unique constraint on
-     * (user_id, day_number) is dropped and the 3-column one ensured. Purely
-     * additive: every existing row trivially satisfies the wider constraint.
+     * Ensures {@code workout_day} is unique on {@code (user_id, plan_id, day_number)}
+     * and drops every legacy unique key that is incompatible with multiple plans.
+     * Runs on every boot and is a no-op once the schema is correct.
      */
-    private void ensurePlanUniqueConstraint() {
-        try (Connection c = dataSource.getConnection()) {
-            String product = c.getMetaData().getDatabaseProductName().toLowerCase();
-            if (!product.contains("postgres")) {
-                // H2/MySQL dev databases are recreated freely; the composite
-                // (user_id, day_number) constraint they may carry is harmless
-                // for single-plan dev usage. PostgreSQL (production) gets the
-                // full treatment.
-                return;
-            }
-            List<String> toDrop = new ArrayList<>();
-            boolean threeColExists = false;
-            try (Statement st = c.createStatement();
-                 ResultSet rs = st.executeQuery("""
-                         SELECT con.conname AS name,
-                                string_agg(att.attname, ',' ORDER BY k.ord) AS cols
-                         FROM pg_constraint con
-                         JOIN pg_class rel ON rel.oid = con.conrelid
-                         CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                         JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = k.attnum
-                         WHERE rel.relname = 'workout_day'
-                           AND con.contype = 'u'
-                         GROUP BY con.conname
-                         """)) {
-                while (rs.next()) {
-                    String cols = rs.getString("cols").toLowerCase();
-                    if (cols.contains("plan_id") && cols.contains("user_id") && cols.contains("day_number")) {
-                        threeColExists = true;
-                    } else if (cols.equals("user_id,day_number") || cols.equals("day_number,user_id")) {
-                        toDrop.add(rs.getString("name"));
-                    }
-                }
-            }
-            for (String name : toDrop) {
-                try (Statement st = c.createStatement()) {
-                    st.executeUpdate("ALTER TABLE workout_day DROP CONSTRAINT \"" + name + "\"");
-                    log.info("Dropped legacy unique constraint '{}' on workout_day (user_id, day_number)", name);
-                }
-            }
-            if (!threeColExists) {
-                try (Statement st = c.createStatement()) {
-                    st.executeUpdate("ALTER TABLE workout_day ADD CONSTRAINT uk_workout_day_user_plan_day "
-                            + "UNIQUE (user_id, plan_id, day_number)");
-                    log.info("Created unique constraint uk_workout_day_user_plan_day (user_id, plan_id, day_number)");
-                }
-            }
-        } catch (Exception e) {
-            log.error("Could not fix workout_day plan uniqueness: {}", e.getMessage(), e);
-            throw new IllegalStateException("workout_day plan uniqueness fix failed", e);
-        }
-    }
-
-    /**
-     * Backfills the plan system for users that predate it. For every user:
-     *  - creates one plan named "My Split" (unless the name is taken),
-     *  - attaches their plan-less workout_day rows to it by existing ID,
-     *  - sets active_plan_id if unset.
-     * Idempotent: skips users whose days already carry a plan. Never touches
-     * sessions, sets, exercises or dates.
-     */
-    private void backfillPlans() {
-        for (AppUser user : userRepository.findAll()) {
-            List<WorkoutDay> orphanDays = workoutDayRepository.findByUserIdAndPlanIdIsNull(user.getId());
-            if (orphanDays.isEmpty()) {
-                continue;
-            }
-            WorkoutPlan plan = planRepository.findByUserIdAndNameIgnoreCase(user.getId(), "My Split")
-                    .orElseGet(() -> {
-                        WorkoutPlan p = new WorkoutPlan();
-                        p.setUserId(user.getId());
-                        p.setName("My Split");
-                        return planRepository.save(p);
-                    });
-            for (WorkoutDay day : orphanDays) {
-                day.setPlanId(plan.getId());
-                workoutDayRepository.save(day);
-            }
-            if (user.getActivePlanId() == null) {
-                user.setActivePlanId(plan.getId());
-                userRepository.save(user);
-            }
-            log.info("Backfilled plan '{}' with {} workout days for user '{}' (existing IDs preserved)",
-                    plan.getName(), orphanDays.size(), user.getUsername());
-        }
-    }
-
-    /**
-     * Ensures every user with an active plan has a 7-day weekday schedule derived from
-     * their legacy 5-slot split + startDay. Inserts rest-only rows only where needed.
-     * Never modifies sessions, sets, or existing training day IDs.
-     */
-    private void backfillSevenDaySchedules() {
-        for (AppUser user : userRepository.findAll()) {
-            if (user.getActivePlanId() == null) {
-                List<WorkoutPlan> plans = planRepository.findAllByUserIdOrderByCreatedAtDesc(user.getId());
-                if (!plans.isEmpty()) {
-                    user.setActivePlanId(plans.get(0).getId());
-                    userRepository.save(user);
-                } else {
-                    continue;
-                }
-            }
-            planScheduleSupport.ensureSevenDaySchedule(user, user.getActivePlanId());
-        }
-    }
-
-    // ------------------------------------------------------------ constraint
-
-    /**
-     * Multi-user requires UNIQUE (user_id, day_number): every user may have
-     * their own Day 1..5. The old schema made day_number globally unique.
-     * Drops any leftover single-column unique constraint/index and ensures the
-     * composite one exists. Runs on every boot and is a no-op once fixed.
-     */
-    private void ensureDayNumberConstraint() {
+    private void ensureWorkoutDayUniqueness() {
         try (Connection c = dataSource.getConnection()) {
             String product = c.getMetaData().getDatabaseProductName().toLowerCase();
             if (product.contains("postgres")) {
-                ensureConstraintPostgres(c);
+                ensureUniquenessPostgres(c);
             } else if (product.contains("mysql") || product.contains("mariadb")) {
-                ensureConstraintMysql(c);
+                ensureUniquenessInfoSchema(c, true);
             } else {
-                ensureConstraintH2(c);
+                ensureUniquenessInfoSchema(c, false);
             }
         } catch (Exception e) {
-            // Never hide a schema problem: if the constraint can't be fixed and
-            // we continue, the old global UNIQUE(day_number) would silently
-            // break new users. Fail startup loudly instead.
-            log.error("Could not fix workout_day.day_number uniqueness: {}", e.getMessage(), e);
-            throw new IllegalStateException("workout_day.day_number uniqueness fix failed", e);
+            // Never hide a schema problem: continuing with an incompatible old
+            // constraint would silently break plan creation for every user.
+            log.error("Could not reconcile workout_day uniqueness: {}", e.getMessage(), e);
+            throw new IllegalStateException("workout_day uniqueness fix failed", e);
         }
     }
 
     /**
-     * PostgreSQL: unique constraints are owned by a table constraint, so the
-     * constraint itself must be dropped (DROP INDEX fails with
-     * "...constraint ... on table workout_day requires it").
+     * PostgreSQL: unique constraints are table constraints, so the constraint
+     * itself must be dropped (DROP INDEX fails with "constraint ... requires it").
      */
-    private void ensureConstraintPostgres(Connection c) throws SQLException {
-        boolean compositeExists = false;
+    private void ensureUniquenessPostgres(Connection c) throws SQLException {
+        boolean planCompositeExists = false;
         List<String> toDrop = new ArrayList<>();
         try (Statement st = c.createStatement();
              ResultSet rs = st.executeQuery("""
@@ -264,57 +152,87 @@ public class SchemaMigration implements CommandLineRunner {
                      GROUP BY con.conname
                      """)) {
             while (rs.next()) {
-                String name = rs.getString("name");
-                String cols = rs.getString("cols");
-                if ("day_number".equals(cols)) {
-                    toDrop.add(name);
-                } else if (isUserDay(cols)) {
-                    compositeExists = true;
+                List<String> cols = splitColumns(rs.getString("cols"));
+                if (isPlanDayKey(cols)) {
+                    planCompositeExists = true;
+                } else if (isLegacyDayKey(cols)) {
+                    toDrop.add(rs.getString("name"));
                 }
             }
         }
         for (String name : toDrop) {
             try (Statement st = c.createStatement()) {
                 st.executeUpdate("ALTER TABLE workout_day DROP CONSTRAINT \"" + name + "\"");
-                log.info("Dropped legacy unique constraint '{}' on workout_day.day_number", name);
+                log.info("Dropped legacy unique constraint '{}' on workout_day (incompatible with multiple plans)", name);
             }
         }
-        // Any leftover unique index (not constraint-backed) on day_number alone.
-        List<String> orphanIndexes = new ArrayList<>();
-        try (Statement st = c.createStatement();
-             ResultSet rs = st.executeQuery("""
-                     SELECT ic.relname AS name
-                     FROM pg_index i
-                     JOIN pg_class tc ON tc.oid = i.indrelid
-                     JOIN pg_class ic ON ic.oid = i.indexrelid
-                     JOIN pg_namespace ns ON ns.oid = tc.relnamespace
-                     LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
-                     WHERE tc.relname = 'workout_day'
-                       AND ns.nspname = current_schema()
-                       AND i.indisunique
-                       AND con.conindid IS NULL
-                       AND i.indnkeyatts = 1
-                       AND i.indkey[0] = (SELECT attnum FROM pg_attribute
-                                          WHERE attrelid = i.indrelid AND attname = 'day_number')
-                     """)) {
-            while (rs.next()) {
-                orphanIndexes.add(rs.getString("name"));
-            }
-        }
-        for (String name : orphanIndexes) {
+
+        // Any leftover unique index that is not constraint-backed (day_number alone
+        // or user_id+day_number) must also go.
+        for (String name : orphanUniqueIndexesPostgres(c)) {
             try (Statement st = c.createStatement()) {
                 st.executeUpdate("DROP INDEX IF EXISTS \"" + name + "\"");
-                log.info("Dropped legacy unique index '{}' on workout_day.day_number", name);
+                log.info("Dropped legacy unique index '{}' on workout_day", name);
             }
         }
-        if (!compositeExists) {
-            createComposite(c);
+
+        if (!planCompositeExists) {
+            createPlanDayConstraint(c, "ALTER TABLE workout_day ADD CONSTRAINT uk_workout_day_user_plan_day "
+                    + "UNIQUE (user_id, plan_id, day_number)");
         }
     }
 
-    /** MySQL/MariaDB: a unique constraint IS its index, so DROP INDEX removes both. */
-    private void ensureConstraintMysql(Connection c) throws SQLException {
-        Map<String, List<String>> byName = constraintsByColumns(c, """
+    private List<String> orphanUniqueIndexesPostgres(Connection c) throws SQLException {
+        List<String> names = new ArrayList<>();
+        String single = """
+                SELECT ic.relname AS name
+                FROM pg_index i
+                JOIN pg_class tc ON tc.oid = i.indrelid
+                JOIN pg_class ic ON ic.oid = i.indexrelid
+                JOIN pg_namespace ns ON ns.oid = tc.relnamespace
+                LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
+                WHERE tc.relname = 'workout_day'
+                  AND ns.nspname = current_schema()
+                  AND i.indisunique
+                  AND con.conindid IS NULL
+                  AND i.indnkeyatts = 1
+                  AND i.indkey[0] = (SELECT attnum FROM pg_attribute
+                                     WHERE attrelid = i.indrelid AND attname = 'day_number')
+                """;
+        String pair = """
+                SELECT ic.relname AS name
+                FROM pg_index i
+                JOIN pg_class tc ON tc.oid = i.indrelid
+                JOIN pg_class ic ON ic.oid = i.indexrelid
+                JOIN pg_namespace ns ON ns.oid = tc.relnamespace
+                LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
+                WHERE tc.relname = 'workout_day'
+                  AND ns.nspname = current_schema()
+                  AND i.indisunique
+                  AND con.conindid IS NULL
+                  AND i.indnkeyatts = 2
+                  AND i.indkey[0] IN (SELECT attnum FROM pg_attribute
+                                      WHERE attrelid = i.indrelid AND attname IN ('user_id', 'day_number'))
+                  AND i.indkey[1] IN (SELECT attnum FROM pg_attribute
+                                      WHERE attrelid = i.indrelid AND attname IN ('user_id', 'day_number'))
+                """;
+        for (String sql : List.of(single, pair)) {
+            try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+                while (rs.next()) {
+                    names.add(rs.getString("name"));
+                }
+            }
+        }
+        return names;
+    }
+
+    /**
+     * MySQL/MariaDB and H2: a unique constraint IS its index, so DROP INDEX /
+     * DROP CONSTRAINT removes both. {@code mysql} only changes the DROP syntax.
+     */
+    private void ensureUniquenessInfoSchema(Connection c, boolean mysql) throws SQLException {
+        String sql = mysql
+                ? """
                 SELECT tc.CONSTRAINT_NAME AS name, kcu.COLUMN_NAME AS col
                 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
                 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
@@ -324,27 +242,8 @@ public class SchemaMigration implements CommandLineRunner {
                   AND tc.TABLE_NAME = 'workout_day'
                   AND tc.CONSTRAINT_TYPE = 'UNIQUE'
                 ORDER BY tc.CONSTRAINT_NAME, kcu.COLUMN_NAME
-                """);
-        boolean compositeExists = false;
-        for (Map.Entry<String, List<String>> e : byName.entrySet()) {
-            List<String> cols = e.getValue();
-            if (cols.size() == 1 && "day_number".equalsIgnoreCase(cols.get(0))) {
-                try (Statement st = c.createStatement()) {
-                    st.executeUpdate("ALTER TABLE workout_day DROP INDEX `" + e.getKey() + "`");
-                    log.info("Dropped legacy unique index '{}' on workout_day.day_number", e.getKey());
-                }
-            } else if (isUserDay(cols)) {
-                compositeExists = true;
-            }
-        }
-        if (!compositeExists) {
-            createComposite(c);
-        }
-    }
-
-    /** H2 (local dev): constraint-backed indexes must be dropped via DROP CONSTRAINT. */
-    private void ensureConstraintH2(Connection c) throws SQLException {
-        Map<String, List<String>> byName = constraintsByColumns(c, """
+                """
+                : """
                 SELECT tc.CONSTRAINT_NAME AS name, ccu.COLUMN_NAME AS col
                 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
                 JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu
@@ -353,32 +252,8 @@ public class SchemaMigration implements CommandLineRunner {
                 WHERE tc.TABLE_NAME = 'WORKOUT_DAY'
                   AND tc.CONSTRAINT_TYPE = 'UNIQUE'
                 ORDER BY tc.CONSTRAINT_NAME, ccu.COLUMN_NAME
-                """);
-        boolean compositeExists = false;
-        for (Map.Entry<String, List<String>> e : byName.entrySet()) {
-            List<String> cols = e.getValue();
-            if (cols.size() == 1 && "DAY_NUMBER".equalsIgnoreCase(cols.get(0))) {
-                try (Statement st = c.createStatement()) {
-                    st.executeUpdate("ALTER TABLE WORKOUT_DAY DROP CONSTRAINT \"" + e.getKey() + "\"");
-                    log.info("Dropped legacy unique constraint '{}' on workout_day.day_number", e.getKey());
-                }
-            } else if (isUserDay(cols)) {
-                compositeExists = true;
-            }
-        }
-        if (!compositeExists) {
-            createComposite(c);
-        }
-    }
+                """;
 
-    /**
-     * Constraint name -> column list, for the given dialect query. The checks
-     * below are order-insensitive (single day_number column vs. a two-column
-     * user_id+day_number pair), so a portable ORDER BY COLUMN_NAME is used
-     * instead of dialect-specific ordinal columns (e.g. H2 2.x's
-     * CONSTRAINT_COLUMN_USAGE has no ORDINAL_POSITION).
-     */
-    private Map<String, List<String>> constraintsByColumns(Connection c, String sql) throws SQLException {
         Map<String, List<String>> byName = new LinkedHashMap<>();
         try (Statement st = c.createStatement(); ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) {
@@ -386,26 +261,77 @@ public class SchemaMigration implements CommandLineRunner {
                         .add(rs.getString("col"));
             }
         }
-        return byName;
+
+        boolean planCompositeExists = false;
+        for (Map.Entry<String, List<String>> e : byName.entrySet()) {
+            List<String> cols = e.getValue();
+            if (isPlanDayKey(cols)) {
+                planCompositeExists = true;
+            } else if (isLegacyDayKey(cols)) {
+                try (Statement st = c.createStatement()) {
+                    if (mysql) {
+                        st.executeUpdate("ALTER TABLE workout_day DROP INDEX `" + e.getKey() + "`");
+                    } else {
+                        st.executeUpdate("ALTER TABLE WORKOUT_DAY DROP CONSTRAINT \"" + e.getKey() + "\"");
+                    }
+                    log.info("Dropped legacy unique key '{}' on workout_day (incompatible with multiple plans)", e.getKey());
+                }
+            }
+        }
+        if (!planCompositeExists) {
+            createPlanDayConstraint(c, "ALTER TABLE workout_day ADD CONSTRAINT uk_workout_day_user_plan_day "
+                    + "UNIQUE (user_id, plan_id, day_number)");
+        }
     }
 
-    /** "user_id,day_number" or "day_number,user_id" (column order varies by dialect). */
-    private boolean isUserDay(List<String> cols) {
+    /** The correct key: exactly {user_id, plan_id, day_number}. */
+    private boolean isPlanDayKey(List<String> cols) {
+        return cols.size() == 3
+                && cols.stream().anyMatch("user_id"::equalsIgnoreCase)
+                && cols.stream().anyMatch("plan_id"::equalsIgnoreCase)
+                && cols.stream().anyMatch("day_number"::equalsIgnoreCase);
+    }
+
+    /** Legacy keys that break multiple plans: {day_number} or {user_id, day_number}. */
+    private boolean isLegacyDayKey(List<String> cols) {
+        if (cols.size() == 1) {
+            return "day_number".equalsIgnoreCase(cols.get(0));
+        }
         return cols.size() == 2
                 && cols.stream().anyMatch("user_id"::equalsIgnoreCase)
                 && cols.stream().anyMatch("day_number"::equalsIgnoreCase);
     }
 
-    private boolean isUserDay(String cols) {
-        String normalized = cols.toLowerCase();
-        return normalized.equals("user_id,day_number") || normalized.equals("day_number,user_id");
+    private List<String> splitColumns(String csv) {
+        List<String> cols = new ArrayList<>();
+        if (csv == null) {
+            return cols;
+        }
+        for (String part : csv.split(",")) {
+            if (!part.isBlank()) {
+                cols.add(part.trim());
+            }
+        }
+        return cols;
     }
 
-    private void createComposite(Connection c) throws SQLException {
+    private void createPlanDayConstraint(Connection c, String ddl) throws SQLException {
         try (Statement st = c.createStatement()) {
-            st.executeUpdate("ALTER TABLE workout_day ADD CONSTRAINT uk_workout_day_user_day "
-                    + "UNIQUE (user_id, day_number)");
-            log.info("Created unique constraint uk_workout_day_user_day (user_id, day_number)");
+            st.executeUpdate(ddl);
+            log.info("Created unique constraint uk_workout_day_user_plan_day (user_id, plan_id, day_number)");
+        }
+    }
+
+    // ------------------------------------------------------------- plans
+
+    /**
+     * Ensures every user has an active plan and a coherent 7-day schedule.
+     * Delegates to {@link PlanService#ensurePlanForUser(AppUser)} so the boot
+     * path and the registration path share exactly one implementation.
+     */
+    private void reconcilePlans() {
+        for (AppUser user : userRepository.findAll()) {
+            planService.ensurePlanForUser(user);
         }
     }
 

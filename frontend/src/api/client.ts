@@ -300,6 +300,10 @@ export const api = {
   setScheduleRest: (planId: number, weekday: number) =>
     request<ScheduleDay>("PUT", `/api/plans/${planId}/schedule/${weekday}/rest`),
 
+  // Rest → Workout day: create (or rename) the training day on a weekday.
+  createScheduleWorkout: (planId: number, weekday: number, name: string) =>
+    request<ScheduleDay>("PUT", `/api/plans/${planId}/schedule/${weekday}/workout`, { name }),
+
   exercises: () =>
     request<Exercise[]>("GET", "/api/exercises"),
 

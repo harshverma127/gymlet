@@ -43,6 +43,7 @@ public class AuthService {
     private final WorkoutDayRepository workoutDayRepository;
     private final WorkoutExerciseRepository workoutExerciseRepository;
     private final PasswordEncoder passwordEncoder;
+    private final PlanService planService;
     private final SecureRandom random = new SecureRandom();
 
     public AuthService(AppUserRepository userRepository,
@@ -50,13 +51,15 @@ public class AuthService {
                        ExerciseRepository exerciseRepository,
                        WorkoutDayRepository workoutDayRepository,
                        WorkoutExerciseRepository workoutExerciseRepository,
-                       PasswordEncoder passwordEncoder) {
+                       PasswordEncoder passwordEncoder,
+                       PlanService planService) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
         this.exerciseRepository = exerciseRepository;
         this.workoutDayRepository = workoutDayRepository;
         this.workoutExerciseRepository = workoutExerciseRepository;
         this.passwordEncoder = passwordEncoder;
+        this.planService = planService;
     }
 
     // -------------------------------------------------------------- register
@@ -74,6 +77,9 @@ public class AuthService {
         user.setName(username);
         userRepository.save(user);
         copyTemplateInto(user);
+        // Bootstrap the plan + 7-day schedule immediately so a brand-new account
+        // is fully usable without waiting for the next server restart.
+        planService.ensurePlanForUser(user);
         return createSession(user);
     }
 
@@ -103,6 +109,8 @@ public class AuthService {
         }
         user.setPinHash(passwordEncoder.encode(pin));
         userRepository.save(user);
+        // Reconcile the claimed legacy account's plan/schedule (idempotent).
+        planService.ensurePlanForUser(user);
         return createSession(user);
     }
 

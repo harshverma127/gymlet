@@ -37,8 +37,17 @@ public class WorkoutDay {
     @Column(name = "weekday")
     private Integer weekday;
 
-    /** When true, this weekday is a rest day (no workout template). */
-    @Column(name = "rest_day", nullable = false)
+    /**
+     * When true, this weekday is a rest day (no workout template).
+     *
+     * The explicit DDL default matters on PostgreSQL: {@code workout_day} is an
+     * existing, populated table, and Hibernate's {@code ddl-auto=update} cannot
+     * add a plain NOT NULL column to non-empty data (it logs a warning and keeps
+     * going, which is how {@code column wd1_0.rest_day does not exist} reached
+     * production). With the default inline, the ALTER succeeds during JPA init —
+     * before the web server accepts requests and before any migration runner.
+     */
+    @Column(name = "rest_day", nullable = false, columnDefinition = "boolean default false")
     private boolean restDay = false;
 
     public Long getPlanId() {

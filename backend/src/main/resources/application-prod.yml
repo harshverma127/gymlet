@@ -23,9 +23,9 @@ spring:
     url: ${DB_URL:${DATABASE_URL:}}
     username: ${DB_USER:${DATABASE_USERNAME:}}
     password: ${DB_PASSWORD:${DATABASE_PASSWORD:}}
+    # Set explicitly so a leftover H2 default can never win. The PostgreSQL
+    # driver is on the runtime classpath (see pom.xml).
     driver-class-name: org.postgresql.Driver
-    # No driver-class-name on purpose: the PostgreSQL JDBC driver registers
-    # itself and is selected automatically for jdbc:postgresql:// URLs.
     hikari:
       # Supabase free tier allows only a small number of concurrent
       # connections; keep the pool tight.

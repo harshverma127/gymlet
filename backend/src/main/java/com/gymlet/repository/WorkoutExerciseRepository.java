@@ -19,4 +19,7 @@ public interface WorkoutExerciseRepository extends JpaRepository<WorkoutExercise
     void deleteByWorkoutDayId(Long workoutDayId);
 
     List<WorkoutExercise> findAllByWorkoutDayIdIn(List<Long> workoutDayIds);
+
+    /** Number of exercises attached to a workout day (used when choosing a schedule keeper). */
+    long countByWorkoutDayId(Long workoutDayId);
 }

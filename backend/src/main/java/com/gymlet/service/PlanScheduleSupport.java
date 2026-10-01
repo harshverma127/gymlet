@@ -1,7 +1,11 @@
 package com.gymlet.service;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -51,13 +55,15 @@ public class PlanScheduleSupport {
      */
     public Optional<WorkoutDay> scheduledWorkout(Long userId, Long planId, int weekday, int startDay) {
         validateWeekday(weekday);
-        Optional<WorkoutDay> row = workoutDayRepository.findByUserIdAndPlanIdAndWeekday(userId, planId, weekday);
-        if (row.isPresent()) {
-            WorkoutDay d = row.get();
-            if (d.isRestDay()) {
-                return Optional.empty();
-            }
-            return Optional.of(d);
+        List<WorkoutDay> rows = workoutDayRepository
+                .findAllByUserIdAndPlanIdAndWeekdayOrderByIdAsc(userId, planId, weekday);
+        Optional<WorkoutDay> training = rows.stream().filter(d -> !d.isRestDay()).findFirst();
+        if (training.isPresent()) {
+            return training;
+        }
+        if (!rows.isEmpty()) {
+            // Explicit rest row(s) for this weekday — no legacy fallback.
+            return Optional.empty();
         }
         int legacySlot = legacySlotForWeekday(startDay, weekday);
         if (legacySlot < 1 || legacySlot > 5) {
@@ -82,40 +88,141 @@ public class PlanScheduleSupport {
             throw new IllegalArgumentException("Custom workouts cannot be scheduled");
         }
 
-        workoutDayRepository.findByUserIdAndPlanIdAndWeekday(userId, planId, weekday)
-                .filter(existing -> !java.util.Objects.equals(existing.getId(), day.getId()))
-                .ifPresent(existing -> {
-                    existing.setWeekday(null);
-                    workoutDayRepository.save(existing);
-                });
+        for (WorkoutDay existing : workoutDayRepository
+                .findAllByUserIdAndPlanIdAndWeekdayOrderByIdAsc(userId, planId, weekday)) {
+            if (!Objects.equals(existing.getId(), day.getId())) {
+                existing.setWeekday(null);
+                workoutDayRepository.save(existing);
+            }
+        }
         day.setWeekday(weekday);
         day.setRestDay(false);
         return workoutDayRepository.save(day);
     }
 
+    /**
+     * Turns one weekday into a real, editable training day (Rest → Workout day).
+     *
+     * - If the weekday already holds a training day, it is simply renamed.
+     * - Otherwise the scheduled rest row (if any) is detached and left intact as
+     *   an unscheduled rest row, and a brand-new training day is created for the
+     *   weekday with the next free day_number (< {@link #REST_DAY_NUMBER_BASE}).
+     *
+     * Exercises and history are never touched. Idempotent: calling it twice for
+     * the same weekday only renames the workout created the first time.
+     */
+    public WorkoutDay createWorkoutDay(Long userId, Long planId, int weekday, String name) {
+        validateWeekday(weekday);
+        String label = name == null ? "" : name.trim();
+        if (label.length() > 60) {
+            throw new IllegalArgumentException("Workout name must be 60 characters or fewer");
+        }
+
+        List<WorkoutDay> occupants = workoutDayRepository
+                .findAllByUserIdAndPlanIdAndWeekdayOrderByIdAsc(userId, planId, weekday);
+
+        // A training day already owns the weekday: rename it and merge duplicate
+        // occupants away instead of creating a second schedule row.
+        Optional<WorkoutDay> existingTraining = occupants.stream().filter(d -> !d.isRestDay()).findFirst();
+        if (existingTraining.isPresent()) {
+            WorkoutDay training = existingTraining.get();
+            detachOtherOccupants(occupants, training);
+            if (!label.isEmpty() && !label.equals(training.getName())) {
+                training.setName(label);
+                return workoutDayRepository.save(training);
+            }
+            return training;
+        }
+
+        // Only a rest row occupies the weekday: transform that same row in place
+        // (row id — and therefore any historical sessions — survive the change)
+        // and move it out of the reserved rest day_number range so it becomes a
+        // selectable workout. No duplicate rest row is left behind.
+        Optional<WorkoutDay> rest = occupants.stream().filter(WorkoutDay::isRestDay).findFirst();
+        if (rest.isPresent()) {
+            WorkoutDay day = rest.get();
+            detachOtherOccupants(occupants, day);
+            int dayNumber = day.getDayNumber() == null || day.getDayNumber() >= REST_DAY_NUMBER_BASE
+                    ? nextTrainingDayNumber(userId, planId)
+                    : day.getDayNumber();
+            day.setWeekday(weekday);
+            day.setRestDay(false);
+            day.setDayNumber(dayNumber);
+            day.setName(label.isEmpty() ? "Workout " + dayNumber : label);
+            return workoutDayRepository.save(day);
+        }
+
+        int dayNumber = nextTrainingDayNumber(userId, planId);
+        WorkoutDay day = new WorkoutDay();
+        day.setUserId(userId);
+        day.setPlanId(planId);
+        day.setWeekday(weekday);
+        day.setRestDay(false);
+        day.setDayNumber(dayNumber);
+        day.setName(label.isEmpty() ? "Workout " + dayNumber : label);
+        return workoutDayRepository.save(day);
+    }
+
+    /** Smallest unused day_number at or above {@link #CUSTOM_DAY_NUMBER}+1, staying below {@link #REST_DAY_NUMBER_BASE}. */
+    private int nextTrainingDayNumber(Long userId, Long planId) {
+        Set<Integer> used = new HashSet<>();
+        for (WorkoutDay day : workoutDayRepository.findAllByUserIdAndPlanIdOrderByDayNumberAsc(userId, planId)) {
+            if (day.getDayNumber() != null) {
+                used.add(day.getDayNumber());
+            }
+        }
+        int candidate = CUSTOM_DAY_NUMBER + 1;
+        while (used.contains(candidate)) {
+            candidate++;
+        }
+        if (candidate >= REST_DAY_NUMBER_BASE) {
+            throw new IllegalStateException("This plan already has the maximum number of workout days");
+        }
+        return candidate;
+    }
+
     /** Creates or restores the reserved rest row for one weekday. */
     public WorkoutDay setRestDay(Long userId, Long planId, int weekday) {
         validateWeekday(weekday);
-        workoutDayRepository.findByUserIdAndPlanIdAndWeekday(userId, planId, weekday)
-                .filter(day -> !day.isRestDay())
-                .ifPresent(day -> {
-                    day.setWeekday(null);
-                    workoutDayRepository.save(day);
-                });
+        int reservedNumber = restDayNumberForWeekday(weekday);
+        List<WorkoutDay> occupants = workoutDayRepository
+                .findAllByUserIdAndPlanIdAndWeekdayOrderByIdAsc(userId, planId, weekday);
+
+        List<WorkoutDay> detached = new ArrayList<>();
+        for (WorkoutDay day : occupants) {
+            if (!day.isRestDay()) {
+                day.setWeekday(null);
+                workoutDayRepository.save(day);
+                detached.add(day);
+            }
+        }
 
         WorkoutDay rest = workoutDayRepository
-                .findByUserIdAndPlanIdAndDayNumber(userId, planId, restDayNumberForWeekday(weekday))
-                .orElseGet(() -> {
-                    WorkoutDay created = new WorkoutDay();
-                    created.setUserId(userId);
-                    created.setPlanId(planId);
-                    created.setDayNumber(restDayNumberForWeekday(weekday));
-                    return created;
-                });
+                .findByUserIdAndPlanIdAndDayNumber(userId, planId, reservedNumber)
+                .orElseGet(() -> detached.stream()
+                        .filter(d -> Objects.equals(d.getDayNumber(), reservedNumber))
+                        .findFirst()
+                        .orElseGet(() -> {
+                            WorkoutDay created = new WorkoutDay();
+                            created.setUserId(userId);
+                            created.setPlanId(planId);
+                            created.setDayNumber(reservedNumber);
+                            return created;
+                        }));
         rest.setName("Rest");
         rest.setWeekday(weekday);
         rest.setRestDay(true);
         return workoutDayRepository.save(rest);
+    }
+
+    /** Detaches every occupant of a weekday except the keeper, so only one row keeps the weekday. */
+    private void detachOtherOccupants(List<WorkoutDay> occupants, WorkoutDay keeper) {
+        for (WorkoutDay other : occupants) {
+            if (!Objects.equals(other.getId(), keeper.getId()) && other.getWeekday() != null) {
+                other.setWeekday(null);
+                workoutDayRepository.save(other);
+            }
+        }
     }
 
     private void validateWeekday(int weekday) {
@@ -144,29 +251,49 @@ public class PlanScheduleSupport {
         Long userId = user.getId();
         int startDay = user.getStartDay() != null ? user.getStartDay() : 1;
         List<WorkoutDay> inPlan = workoutDayRepository.findAllByUserIdAndPlanIdOrderByDayNumberAsc(userId, planId);
+
+        // A plan that already carries any explicit weekday is an explicit 7-day
+        // schedule. Legacy plans (no weekday set anywhere) are mapped below.
+        boolean explicitSchedule = inPlan.stream().anyMatch(d -> d.getWeekday() != null);
         Set<Integer> weekdaysTaken = new HashSet<>();
 
+        // At most one keeper per weekday; duplicates are detached, never deleted.
+        Map<Integer, WorkoutDay> byWeekday = new LinkedHashMap<>();
         for (WorkoutDay day : inPlan) {
-            if (day.getDayNumber() != null && day.getDayNumber() == CUSTOM_DAY_NUMBER) {
+            Integer weekday = day.getWeekday();
+            if (weekday == null || weekday < 1 || weekday > 7) {
                 continue;
             }
-            if (day.isRestDay()) {
-                if (day.getWeekday() != null) {
-                    weekdaysTaken.add(day.getWeekday());
-                }
+            WorkoutDay existing = byWeekday.get(weekday);
+            if (existing == null) {
+                byWeekday.put(weekday, day);
+                weekdaysTaken.add(weekday);
                 continue;
             }
-            if (day.getDayNumber() != null && day.getDayNumber() >= 1 && day.getDayNumber() <= 5) {
-                if (day.getWeekday() == null) {
-                    int legacyWeekday = weekdayForLegacySlot(startDay, day.getDayNumber());
-                    if (workoutDayRepository.findByUserIdAndPlanIdAndWeekday(userId, planId, legacyWeekday)
-                            .isEmpty()) {
-                        day.setWeekday(legacyWeekday);
-                        workoutDayRepository.save(day);
-                    }
+            WorkoutDay keeper = preferKeeper(existing, day);
+            WorkoutDay loser = keeper == existing ? day : existing;
+            byWeekday.put(weekday, keeper);
+            if (!Objects.equals(loser.getId(), keeper.getId())) {
+                loser.setWeekday(null);
+                workoutDayRepository.save(loser);
+            }
+        }
+
+        // Legacy plans map training slots 1..5 onto weekdays via the week anchor.
+        if (!explicitSchedule) {
+            for (WorkoutDay day : inPlan) {
+                if (day.getWeekday() != null || day.isRestDay()) {
+                    continue;
                 }
-                if (day.getWeekday() != null) {
-                    weekdaysTaken.add(day.getWeekday());
+                Integer dayNumber = day.getDayNumber();
+                if (dayNumber == null || dayNumber == CUSTOM_DAY_NUMBER || dayNumber < 1 || dayNumber > 5) {
+                    continue;
+                }
+                int legacyWeekday = weekdayForLegacySlot(startDay, dayNumber);
+                if (!weekdaysTaken.contains(legacyWeekday)) {
+                    day.setWeekday(legacyWeekday);
+                    workoutDayRepository.save(day);
+                    weekdaysTaken.add(legacyWeekday);
                 }
             }
         }
@@ -175,8 +302,9 @@ public class PlanScheduleSupport {
             if (weekdaysTaken.contains(weekday)) {
                 continue;
             }
-            if (workoutDayRepository.findByUserIdAndPlanIdAndWeekday(userId, planId, weekday).isPresent()) {
-                continue;
+            int dayNumber = restDayNumberForWeekday(weekday);
+            while (dayNumberTaken(inPlan, dayNumber)) {
+                dayNumber++;
             }
             WorkoutDay rest = new WorkoutDay();
             rest.setUserId(userId);
@@ -184,9 +312,30 @@ public class PlanScheduleSupport {
             rest.setWeekday(weekday);
             rest.setRestDay(true);
             rest.setName("Rest");
-            rest.setDayNumber(restDayNumberForWeekday(weekday));
+            rest.setDayNumber(dayNumber);
             workoutDayRepository.save(rest);
+            inPlan.add(rest);
+            weekdaysTaken.add(weekday);
         }
+    }
+
+    /** Prefers a training day over a rest row, then the lowest id. */
+    private WorkoutDay preferKeeper(WorkoutDay a, WorkoutDay b) {
+        if (a.isRestDay() != b.isRestDay()) {
+            return a.isRestDay() ? b : a;
+        }
+        long aid = a.getId() == null ? Long.MAX_VALUE : a.getId();
+        long bid = b.getId() == null ? Long.MAX_VALUE : b.getId();
+        return aid <= bid ? a : b;
+    }
+
+    private boolean dayNumberTaken(List<WorkoutDay> rows, int dayNumber) {
+        for (WorkoutDay day : rows) {
+            if (Objects.equals(day.getDayNumber(), dayNumber)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Training workouts available for the day picker (non-rest, with legacy slots or assigned weekday). */

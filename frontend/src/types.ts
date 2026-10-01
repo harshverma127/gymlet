@@ -115,11 +115,19 @@ export interface WorkoutDaySummary {
   name: string;
 }
 
+export interface TodaySessionSummary {
+  id: number;
+  workoutDayName: string;
+  completed: boolean;
+  startedAt: string;
+}
+
 export interface Today {
   isRestDay: boolean;
-  dayNumber: number;
-  workoutDayId: number;
-  workoutDayName: string;
+  /** Null when the active plan has no scheduled training day yet (e.g. all rest days). */
+  dayNumber: number | null;
+  workoutDayId: number | null;
+  workoutDayName: string | null;
   exercises: TodayExercise[];
   activeSessionId: number | null;
   completed: boolean;
@@ -131,6 +139,7 @@ export interface Today {
   activePlanName: string | null;
   scheduledWorkoutDayId: number | null;
   scheduledWorkoutDayName: string | null;
+  sessionsToday?: TodaySessionSummary[];
 }
 
 export interface SetLog {

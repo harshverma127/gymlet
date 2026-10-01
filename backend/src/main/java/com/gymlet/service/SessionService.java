@@ -80,6 +80,7 @@ public class SessionService {
         session.setUserId(user.getId());
         session.setDate(today);
         session.setWorkoutDay(day);
+        session.setWorkoutDayNameSnapshot(day.getName());
         session.setStartedAt(LocalDateTime.now());
         session.setCompleted(false);
         session.setDemo(false);
@@ -146,6 +147,7 @@ public class SessionService {
         session.setUserId(user.getId());
         session.setDate(today);
         session.setWorkoutDay(customDay);
+        session.setWorkoutDayNameSnapshot(customDay.getName());
         session.setStartedAt(LocalDateTime.now());
         session.setCompleted(false);
         session.setDemo(false);
@@ -213,6 +215,7 @@ public class SessionService {
         session.setUserId(user.getId());
         session.setDate(today);
         session.setWorkoutDay(day);
+        session.setWorkoutDayNameSnapshot(day.getName());
         session.setStartedAt(LocalDateTime.now());
         session.setCompleted(false);
         session.setDemo(false);
@@ -274,7 +277,7 @@ public class SessionService {
             int exercises = (int) sets.stream().filter(SetLog::isCompleted)
                     .map(sl -> sl.getExercise().getId()).distinct().count();
             items.add(new WorkoutDtos.HistoryItemDto(
-                    s.getId(), s.getDate().toString(), s.getWorkoutDay().getName(),
+                    s.getId(), s.getDate().toString(), displayName(s),
                     s.isCompleted(), s.isDemo(), completed, s.getDurationMinutes(), exercises,
                     round1(volume)));
         }
@@ -505,8 +508,18 @@ public class SessionService {
                 .toList();
         int completed = (int) sets.stream().filter(SetLog::isCompleted).count();
         return new WorkoutDtos.SessionDto(s.getId(), s.getDate().toString(), s.getWorkoutDay().getId(),
-                s.getWorkoutDay().getName(), s.getDurationMinutes(), s.isCompleted(), s.isDemo(),
+                displayName(s), s.getDurationMinutes(), s.isCompleted(), s.isDemo(),
                 setDtos, notes, sets.size(), completed, round1(volumeOf(sets)));
+    }
+
+    /** Historical label: the name snapshotted when the session started, else the live day name. */
+    private String displayName(WorkoutSession s) {
+        String snapshot = s.getWorkoutDayNameSnapshot();
+        if (snapshot != null && !snapshot.isBlank()) {
+            return snapshot;
+        }
+        WorkoutDay day = s.getWorkoutDay();
+        return day != null ? day.getName() : "Workout";
     }
 
     private double volumeOf(List<SetLog> sets) {

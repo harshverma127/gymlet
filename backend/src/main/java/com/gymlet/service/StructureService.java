@@ -117,26 +117,30 @@ public class StructureService {
                         s.getStartedAt().toString()))
                 .toList();
 
-        WorkoutDay previewDay;
+        WorkoutDay previewDay = null;
         WorkoutSession anchorSession = activeIncomplete;
         if (anchorSession != null) {
             previewDay = anchorSession.getWorkoutDay();
         } else if (scheduled.isPresent()) {
             previewDay = scheduled.get();
-        } else {
-            previewDay = nextTrainingDayAfter(today, user, planId);
         }
 
         boolean restDay = scheduled.isEmpty() && anchorSession == null;
 
-        WorkoutDay nextDay = restDay ? nextTrainingDayAfter(today, user, planId) : null;
+        // On a rest day "up next" is the next scheduled workout. A freshly created
+        // plan may still be entirely rest days — that is a valid state, so this
+        // must never throw: the client shows a rest day with nothing queued yet.
+        WorkoutDay nextDay = restDay ? nextTrainingDayAfterOrNull(today, user, planId) : null;
+        if (restDay) {
+            previewDay = nextDay;
+        }
 
         return buildTodayDto(
                 user, plan, previewDay, today, restDay, anchorSession, nextDay,
                 scheduled.orElse(null), sessionSummaries);
     }
 
-    private WorkoutDay nextTrainingDayAfter(LocalDate from, AppUser user, Long planId) {
+    private WorkoutDay nextTrainingDayAfterOrNull(LocalDate from, AppUser user, Long planId) {
         LocalDate d = from.plusDays(1);
         int startDay = user.getStartDay();
         while (d.isBefore(from.plusDays(8))) {
@@ -149,27 +153,29 @@ public class StructureService {
         }
         return scheduleSupport.selectableTrainingDays(user.getId(), planId).stream()
                 .findFirst()
-                .orElseThrow(() -> new NoSuchElementException("No training days in this plan"));
+                .orElse(null);
     }
 
     private WorkoutDtos.TodayDto buildTodayDto(AppUser user, WorkoutPlan plan, WorkoutDay day, LocalDate today,
                                                boolean restDay, WorkoutSession activeSession, WorkoutDay nextDay,
                                                WorkoutDay scheduledDay,
                                                List<WorkoutDtos.TodaySessionSummaryDto> sessionsToday) {
-        List<WorkoutExercise> wes = workoutExerciseRepository.findByWorkoutDayIdOrderBySetOrderAsc(day.getId());
         List<WorkoutDtos.TodayExerciseDto> exercises = new ArrayList<>();
-        for (WorkoutExercise we : wes) {
-            Exercise ex = we.getExercise();
-            LastSessionData last = lastSessionForExercise(ex.getId());
-            List<WorkoutDtos.LastSetDto> lastSets = last.sets().stream()
-                    .filter(s -> s.isCompleted() && s.getWeight() != null && s.getReps() != null)
-                    .map(s -> new WorkoutDtos.LastSetDto(s.getWeight(), s.getReps()))
-                    .toList();
-            WorkoutDtos.SuggestionDto suggestion = computeSuggestion(ex, last.sets());
-            String lastNote = last.note();
-            exercises.add(new WorkoutDtos.TodayExerciseDto(
-                    ex.getId(), ex.getName(), ex.getMuscleGroup().name(), ex.getRepMin(), ex.getRepMax(),
-                    ex.isCompound(), we.getSets(), lastSets, suggestion, lastNote));
+        if (day != null) {
+            List<WorkoutExercise> wes = workoutExerciseRepository.findByWorkoutDayIdOrderBySetOrderAsc(day.getId());
+            for (WorkoutExercise we : wes) {
+                Exercise ex = we.getExercise();
+                LastSessionData last = lastSessionForExercise(ex.getId());
+                List<WorkoutDtos.LastSetDto> lastSets = last.sets().stream()
+                        .filter(s -> s.isCompleted() && s.getWeight() != null && s.getReps() != null)
+                        .map(s -> new WorkoutDtos.LastSetDto(s.getWeight(), s.getReps()))
+                        .toList();
+                WorkoutDtos.SuggestionDto suggestion = computeSuggestion(ex, last.sets());
+                String lastNote = last.note();
+                exercises.add(new WorkoutDtos.TodayExerciseDto(
+                        ex.getId(), ex.getName(), ex.getMuscleGroup().name(), ex.getRepMin(), ex.getRepMax(),
+                        ex.isCompound(), we.getSets(), lastSets, suggestion, lastNote));
+            }
         }
 
         Long planId = plan.getId();
@@ -180,9 +186,9 @@ public class StructureService {
 
         return new WorkoutDtos.TodayDto(
                 restDay,
-                day.getDayNumber(),
-                day.getId(),
-                day.getName(),
+                day != null ? day.getDayNumber() : null,
+                day != null ? day.getId() : null,
+                day != null ? day.getName() : null,
                 exercises,
                 activeSession != null ? activeSession.getId() : null,
                 activeSession != null && activeSession.isCompleted(),
@@ -361,17 +367,29 @@ public class StructureService {
     public void swapDayNumbers(Long dayId1, Long dayId2) {
         WorkoutDay d1 = requireTrainingDay(dayId1);
         WorkoutDay d2 = requireTrainingDay(dayId2);
-        if (d1.getDayNumber().equals(d2.getDayNumber()) && d1.getWeekday().equals(d2.getWeekday())) {
+        Integer dayNumber1 = d1.getDayNumber();
+        Integer dayNumber2 = d2.getDayNumber();
+        Integer weekday1 = d1.getWeekday();
+        Integer weekday2 = d2.getWeekday();
+        if (java.util.Objects.equals(dayNumber1, dayNumber2)
+                && java.util.Objects.equals(weekday1, weekday2)) {
             return;
         }
-        int tmpNum = d1.getDayNumber();
-        d1.setDayNumber(d2.getDayNumber());
-        d2.setDayNumber(tmpNum);
-        Integer tmpWd = d1.getWeekday();
-        d1.setWeekday(d2.getWeekday());
-        d2.setWeekday(tmpWd);
-        workoutDayRepository.save(d1);
-        workoutDayRepository.save(d2);
+        // Park d1 on a temporary day_number and clear both weekdays first, so the
+        // unique keys (user_id, plan_id, day_number) and (user_id, plan_id, weekday)
+        // are never transiently violated while the two rows exchange their slots.
+        d1.setDayNumber(-1000 - (dayId1 == null ? 0 : (int) (dayId1 % 1000)));
+        d1.setWeekday(null);
+        d2.setWeekday(null);
+        workoutDayRepository.saveAndFlush(d1);
+        workoutDayRepository.saveAndFlush(d2);
+
+        d1.setDayNumber(dayNumber2);
+        d1.setWeekday(weekday2);
+        d2.setDayNumber(dayNumber1);
+        d2.setWeekday(weekday1);
+        workoutDayRepository.saveAndFlush(d1);
+        workoutDayRepository.saveAndFlush(d2);
     }
 
     private WorkoutDay requireTrainingDay(Long id) {

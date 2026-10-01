@@ -165,15 +165,24 @@ function RestDayView({ today, unit, starting, onStartCustom, onChanged }: { toda
         {starting ? "Setting up…" : "Start Custom Workout"}
       </Button>
 
-      <div className="section-head">
-        <h2>Up next</h2>
-        <span className="section-sub">
-          Day {today.nextDayNumber} — {today.nextWorkoutDayName}
-        </span>
-      </div>
-      {today.exercises.map((ex) => (
-        <ExerciseCard key={ex.exerciseId} ex={ex} mode="readonly" unit={unit} />
-      ))}
+      {today.nextWorkoutDayName && (
+        <>
+          <div className="section-head">
+            <h2>Up next</h2>
+            <span className="section-sub">
+              Day {today.nextDayNumber} — {today.nextWorkoutDayName}
+            </span>
+          </div>
+          {today.exercises.map((ex) => (
+            <ExerciseCard key={ex.exerciseId} ex={ex} mode="readonly" unit={unit} />
+          ))}
+        </>
+      )}
+      {!today.nextWorkoutDayName && (
+        <p className="page-hint">
+          No training days scheduled yet — open Profile → Weekly schedule to turn a day into a workout.
+        </p>
+      )}
     </div>
   );
 }
@@ -197,14 +206,14 @@ function ReadyView({
   onStartCustom: () => void;
   onChanged: () => Promise<void>;
 }) {
-  const [selectedDay, setSelectedDay] = useState<number>(today.workoutDayId);
+  const [selectedDay, setSelectedDay] = useState<number | null>(today.workoutDayId);
 
   return (
     <div className="page">
       <PlanSwitcher onChanged={onChanged} />
       <header className="page-head">
         <div>
-          <p className="eyebrow">Day {today.dayNumber} · {weekdayToday()}</p>
+          <p className="eyebrow">Day {today.dayNumber ?? "—"} · {weekdayToday()}</p>
           <h1>{today.workoutDayName}</h1>
         </div>
       </header>
@@ -216,7 +225,7 @@ function ReadyView({
             <span className="field-label">Choose workout</span>
             <select
               className="day-selector"
-              value={selectedDay}
+              value={selectedDay ?? ""}
               onChange={(e) => setSelectedDay(Number(e.target.value))}
             >
               {today.availableDays.map((d: WorkoutDaySummary) => (
@@ -230,7 +239,7 @@ function ReadyView({
       )}
 
       <Button size="lg" className="start-btn" onClick={() => {
-        if (selectedDay === today.workoutDayId) {
+        if (selectedDay == null || selectedDay === today.workoutDayId) {
           onStart();
         } else {
           onStartForDay(selectedDay);
@@ -327,7 +336,7 @@ function WorkoutView(props: WorkoutViewProps) {
     <div className="page">
       <header className="page-head">
         <div>
-          <p className="eyebrow">Day {today.dayNumber} · {weekdayToday()}</p>
+          <p className="eyebrow">Day {today.dayNumber ?? "—"} · {weekdayToday()}</p>
           <h1>{today.workoutDayName}</h1>
         </div>
       </header>

@@ -174,6 +174,18 @@ public class PlanService {
         return toScheduleDayDto(day);
     }
 
+    /**
+     * Rest → Workout day: turns a weekday into a real, editable training day
+     * (creating one if needed) so the schedule UI can always build a plan from
+     * scratch. Historical data is untouched.
+     */
+    @Transactional
+    public PlanDtos.ScheduleDayDto createWorkoutDay(Long planId, int weekday, String name) {
+        WorkoutPlan plan = requireEditablePlan(planId);
+        WorkoutDay day = scheduleSupport.createWorkoutDay(userContext.getUserId(), plan.getId(), weekday, name);
+        return toScheduleDayDto(day);
+    }
+
     @Transactional
     public PlanDtos.ScheduleDayDto setRestDay(Long planId, int weekday) {
         WorkoutPlan plan = requireEditablePlan(planId);
@@ -247,33 +259,47 @@ public class PlanService {
         return new PlanDtos.ScheduleDayDto(day.getId(), day.getWeekday(), day.getDayNumber(), day.getName(), day.isRestDay());
     }
 
-    /** Ensures every user with workout days has an active plan (called from migration). */
+    /**
+     * Ensures the user has a usable active plan and a coherent 7-day schedule.
+     *
+     * This is the single bootstrap used both when a new account registers and
+     * when the app starts up, so a freshly created account never has to wait for
+     * a server restart to get an active plan. Idempotent: an already-configured
+     * user only gets their schedule reconciled (never duplicated, never deleted).
+     */
     @Transactional
-    public WorkoutPlan ensureDefaultPlan(AppUser user) {
-        if (user.getActivePlanId() != null) {
-            return planRepository.findByIdAndUserId(user.getActivePlanId(), user.getId()).orElseGet(() -> {
-                user.setActivePlanId(null);
-                userRepository.save(user);
-                return createMySplitPlan(user);
-            });
+    public WorkoutPlan ensurePlanForUser(AppUser user) {
+        if (user.getActivePlanId() != null
+                && planRepository.findByIdAndUserId(user.getActivePlanId(), user.getId()).isPresent()) {
+            scheduleSupport.ensureSevenDaySchedule(user, user.getActivePlanId());
+            return planRepository.findByIdAndUserId(user.getActivePlanId(), user.getId()).orElseThrow();
         }
-        return createMySplitPlan(user);
-    }
 
-    private WorkoutPlan createMySplitPlan(AppUser user) {
-        WorkoutPlan existing = planRepository.findByUserIdAndNameIgnoreCase(user.getId(), "My Split").orElse(null);
-        if (existing != null) {
-            user.setActivePlanId(existing.getId());
-            userRepository.save(user);
-            return existing;
+        WorkoutPlan plan = planRepository.findByUserIdAndNameIgnoreCase(user.getId(), "My Split")
+                .orElseGet(() -> {
+                    WorkoutPlan p = new WorkoutPlan();
+                    p.setUserId(user.getId());
+                    p.setName("My Split");
+                    return planRepository.save(p);
+                });
+
+        // Attach any plan-less rows (fresh template copy or legacy data) to the plan.
+        for (WorkoutDay orphan : workoutDayRepository.findByUserIdAndPlanIdIsNull(user.getId())) {
+            orphan.setPlanId(plan.getId());
+            workoutDayRepository.save(orphan);
         }
-        WorkoutPlan plan = new WorkoutPlan();
-        plan.setUserId(user.getId());
-        plan.setName("My Split");
-        plan = planRepository.save(plan);
+
         user.setActivePlanId(plan.getId());
         userRepository.save(user);
+        scheduleSupport.ensureSevenDaySchedule(user, plan.getId());
         return plan;
+    }
+
+    /** @deprecated use {@link #ensurePlanForUser(AppUser)} — kept for backward compatibility. */
+    @Deprecated
+    @Transactional
+    public WorkoutPlan ensureDefaultPlan(AppUser user) {
+        return ensurePlanForUser(user);
     }
 
     private PlanDtos.PlanSummaryDto toSummary(WorkoutPlan plan, Long activePlanId) {

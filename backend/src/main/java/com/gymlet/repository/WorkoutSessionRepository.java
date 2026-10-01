@@ -31,6 +31,9 @@ public interface WorkoutSessionRepository extends JpaRepository<WorkoutSession, 
 
     List<WorkoutSession> findAllByUserId(Long userId);
 
+    /** Number of sessions recorded against a workout day (used when choosing a schedule keeper). */
+    long countByWorkoutDayId(Long workoutDayId);
+
     /** Rows that have no owner yet — pre-migration legacy sessions (claimed during migration). */
     List<WorkoutSession> findAllByUserIdIsNull();
 }

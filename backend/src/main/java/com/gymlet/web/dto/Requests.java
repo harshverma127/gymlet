@@ -49,4 +49,8 @@ public final class Requests {
 
     public record ScheduleWorkoutRequest(@NotNull Long workoutDayId) {
     }
+
+    /** Rest → Workout day: the (optional) name of the training day to create/rename. */
+    public record CreateScheduleWorkoutRequest(@Size(max = 60) String name) {
+    }
 }

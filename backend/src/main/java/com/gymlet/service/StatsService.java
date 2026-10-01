@@ -3,6 +3,7 @@ package com.gymlet.service;
 import com.gymlet.domain.AppUser;
 import com.gymlet.domain.Exercise;
 import com.gymlet.domain.SetLog;
+import com.gymlet.domain.WorkoutDay;
 import com.gymlet.domain.WorkoutSession;
 import com.gymlet.repository.SetLogRepository;
 import com.gymlet.repository.WorkoutSessionRepository;
@@ -26,13 +27,16 @@ public class StatsService {
     private final WorkoutSessionRepository sessionRepository;
     private final SetLogRepository setLogRepository;
     private final UserContext userContext;
+    private final PlanScheduleSupport scheduleSupport;
 
     public StatsService(WorkoutSessionRepository sessionRepository,
                         SetLogRepository setLogRepository,
-                        UserContext userContext) {
+                        UserContext userContext,
+                        PlanScheduleSupport scheduleSupport) {
         this.sessionRepository = sessionRepository;
         this.setLogRepository = setLogRepository;
         this.userContext = userContext;
+        this.scheduleSupport = scheduleSupport;
     }
 
     // ------------------------------------------------------------- strength
@@ -230,7 +234,21 @@ public class StatsService {
                 name = s.getWorkoutDay().getName();
             } else if (date.isAfter(today)) {
                 status = "FUTURE";
+            } else if (user.getActivePlanId() != null) {
+                // Use the SAME schedule source of truth as Today so a configured
+                // rest/workout weekday is reflected here too.
+                WorkoutDay scheduled = scheduleSupport.scheduledWorkout(
+                                user.getId(), user.getActivePlanId(), date.getDayOfWeek().getValue(), user.getStartDay())
+                        .orElse(null);
+                if (scheduled != null) {
+                    status = "MISSED";
+                    dayNumber = scheduled.getDayNumber();
+                    name = scheduled.getName();
+                } else {
+                    status = "REST";
+                }
             } else {
+                // Pre-plan fallback for accounts not migrated yet.
                 int idx = (date.getDayOfWeek().getValue() - user.getStartDay() + 7) % 7;
                 if (idx >= 5) {
                     status = "REST";

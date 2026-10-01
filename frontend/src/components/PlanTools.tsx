@@ -242,6 +242,9 @@ export function WeeklySchedule({ onChanged }: PlanSwitcherProps) {
   const [days, setDays] = useState<WorkoutDay[] | null>(null);
   const [selected, setSelected] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState<number | null>(null);
+  const [newWorkoutWeekday, setNewWorkoutWeekday] = useState<number | null>(null);
+  const [newWorkoutName, setNewWorkoutName] = useState("");
+  const [creatingWorkout, setCreatingWorkout] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -280,6 +283,25 @@ export function WeeklySchedule({ onChanged }: PlanSwitcherProps) {
     }
   };
 
+  const createWorkout = async () => {
+    if (newWorkoutWeekday == null || !data?.active?.id) return;
+    const name = newWorkoutName.trim();
+    if (!name) return;
+    setCreatingWorkout(true);
+    try {
+      await api.createScheduleWorkout(data.active.id, newWorkoutWeekday, name);
+      toast(`${name} added on ${DAY_NAMES[newWorkoutWeekday - 1]}`);
+      setNewWorkoutWeekday(null);
+      setNewWorkoutName("");
+      await load();
+      await onChanged?.();
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : "Couldn't create workout day", "error");
+    } finally {
+      setCreatingWorkout(false);
+    }
+  };
+
   return (
     <Card className="section-card schedule-card">
       <div className="section-title-row">
@@ -297,9 +319,17 @@ export function WeeklySchedule({ onChanged }: PlanSwitcherProps) {
               <div key={dayName} className={`schedule-day ${weekday === today ? "is-today" : ""} ${value === "rest" ? "is-rest" : ""}`}>
                 <div className="schedule-day-top"><span className="schedule-weekday">{dayName.slice(0, 3)}</span>{weekday === today && <Pill tone="peach">Today</Pill>}</div>
                 <div className="schedule-status"><span className="schedule-dot" />{assigned ? assigned.name : "Rest day"}</div>
-                <select aria-label={`${dayName} workout`} value={value} disabled={saving === weekday} onChange={(e) => void save(weekday, e.target.value)}>
+                <select aria-label={`${dayName} workout`} value={value} disabled={saving === weekday} onChange={(e) => {
+                  if (e.target.value === "__new__") {
+                    setNewWorkoutName("");
+                    setNewWorkoutWeekday(weekday);
+                  } else {
+                    void save(weekday, e.target.value);
+                  }
+                }}>
                   <option value="rest">Rest day</option>
                   {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+                  <option value="__new__">+ New workout…</option>
                 </select>
                 {saving === weekday && <span className="schedule-saving">Saving…</span>}
               </div>
@@ -307,6 +337,20 @@ export function WeeklySchedule({ onChanged }: PlanSwitcherProps) {
           })}
         </div>
       )}
+      <p className="field-note">New workouts appear in your Workout split below, where you add exercises. Changing the schedule never rewrites your history.</p>
+      <Modal open={newWorkoutWeekday != null} onClose={() => setNewWorkoutWeekday(null)} title="New workout day" footer={
+        <>
+          <Button variant="ghost" onClick={() => setNewWorkoutWeekday(null)} disabled={creatingWorkout}>Cancel</Button>
+          <Button onClick={() => void createWorkout()} disabled={creatingWorkout || !newWorkoutName.trim()}>{creatingWorkout ? "Creating…" : "Create workout"}</Button>
+        </>
+      }>
+        <div className="plan-form">
+          <label className="field">
+            <span className="field-label">Workout name</span>
+            <input autoFocus maxLength={60} value={newWorkoutName} onChange={(e) => setNewWorkoutName(e.target.value)} placeholder="e.g. Legs" />
+          </label>
+        </div>
+      </Modal>
     </Card>
   );
 }

@@ -21,6 +21,17 @@ public interface WorkoutDayRepository extends JpaRepository<WorkoutDay, Long> {
 
     Optional<WorkoutDay> findByUserIdAndPlanIdAndWeekday(Long userId, Long planId, Integer weekday);
 
+    /**
+     * Every row occupying one weekday of a plan, ordered by id.
+     *
+     * <p>The {@code Optional} finder above throws if historical data ever holds
+     * two rows for the same weekday, which is exactly the corruption we repair
+     * on boot. Mutations therefore use this list form and collapse duplicates
+     * deterministically instead of relying on an at-most-one guarantee that was
+     * never enforced for the weekday column.
+     */
+    List<WorkoutDay> findAllByUserIdAndPlanIdAndWeekdayOrderByIdAsc(Long userId, Long planId, Integer weekday);
+
     List<WorkoutDay> findAllByUserIdAndPlanIdAndRestDayFalseOrderByWeekdayAscDayNumberAsc(Long userId, Long planId);
 
     /** Days not yet attached to any plan — pre-migration rows waiting for backfill. */
