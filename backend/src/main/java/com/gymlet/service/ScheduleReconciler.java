@@ -52,6 +52,16 @@ import com.gymlet.repository.WorkoutSessionRepository;
  *
  * <p>Every step is safe to run repeatedly and never deletes sessions, sets,
  * exercises, notes or plans.
+ *
+ * <p>The repair is split into explicit phases that each {@code flush()} before
+ * the next begins. Hibernate executes INSERTs before UPDATEs and DELETEs inside
+ * a single flush, so without those boundaries a newly inserted rest row can
+ * transiently collide with a row that is only parked, renumbered or deleted
+ * later in the same flush — the production
+ * {@code duplicate key ... (user_id, plan_id, day_number)=(2, 4, 51)} failure.
+ * With the flushes, every phase allocates day numbers against the database's
+ * real state, so the reserved-slot allocator is collision-safe and the repair
+ * is deterministic and idempotent.
  */
 @Component
 public class ScheduleReconciler {
@@ -155,6 +165,13 @@ public class ScheduleReconciler {
             }
         }
 
+        // Flush the structural fixes before any day_number is reassigned. A row
+        // deleted or detached above still holds its old day_number in the
+        // database until flushed, and Hibernate executes INSERTs before
+        // UPDATEs and DELETEs within a single flush, so a later phase could pick
+        // a number that is not actually free yet.
+        workoutDayRepository.flush();
+
         // (d) A real workout must not occupy the reserved rest day_number range.
         for (WorkoutDay day : rows) {
             Integer dayNumber = day.getDayNumber();
@@ -169,6 +186,11 @@ public class ScheduleReconciler {
                         day.getId(), old, free);
             }
         }
+
+        // Apply the workout renumbering (phase d) before the reserved rest
+        // slots are assigned, so a training number freed here is visible to
+        // phase (e) and the backfill in phase (g).
+        workoutDayRepository.flush();
 
         // (e) Rest rows use their reserved day_number when it is free.
         for (WorkoutDay day : rows) {
@@ -187,6 +209,11 @@ public class ScheduleReconciler {
                 changes++;
             }
         }
+
+        // Apply the reserved-slot assignment (phase e) before phase (g) inserts
+        // the missing-weekday rest rows, so an INSERT can never race a pending
+        // UPDATE for the same (user_id, plan_id, day_number).
+        workoutDayRepository.flush();
 
         // (f) A workout day needs a meaningful name.
         for (WorkoutDay day : rows) {
